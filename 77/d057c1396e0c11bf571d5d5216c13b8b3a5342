@@ -1,0 +1,57 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "77d057c1396e0c11bf571d5d5216c13b8b3a5342",
+  "prompts": {},
+  "humans": {
+    "h_109b1ff55ecf1c": {
+      "author": "lixuefei.nice <lixuefei.nice@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {
+    "s_258f6c19ea8fe3": {
+      "tool": "trae",
+      "conversation_id": "6a33638dabacc54be9dc023d",
+      "session_id": "6a33638dabacc54be9dc023d",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_258f6c19ea8fe3::t_4bcf0484274b7f": {
+      "tool": "trae",
+      "conversation_id": "6a33638dabacc54be9dc023d",
+      "session_id": "6a33638dabacc54be9dc023d",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_258f6c19ea8fe3::t_5ab7560cc22247": {
+      "tool": "trae",
+      "conversation_id": "6a33638dabacc54be9dc023d",
+      "session_id": "6a33638dabacc54be9dc023d",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_bb0abd5e3d16f1": {
+      "tool": "trae",
+      "conversation_id": "6a325bf3abacc54be9dc0180",
+      "session_id": "6a325bf3abacc54be9dc0180",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_bb0abd5e3d16f1::t_18211f6ed88bf8": {
+      "tool": "trae",
+      "conversation_id": "6a325bf3abacc54be9dc0180",
+      "session_id": "6a325bf3abacc54be9dc0180",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_bb0abd5e3d16f1::t_5f51122820349f": {
+      "tool": "trae",
+      "conversation_id": "6a325bf3abacc54be9dc0180",
+      "session_id": "6a325bf3abacc54be9dc0180",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
