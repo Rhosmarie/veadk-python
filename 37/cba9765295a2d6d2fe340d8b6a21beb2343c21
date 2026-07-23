@@ -1,0 +1,14 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37cba9765295a2d6d2fe340d8b6a21beb2343c21",
+  "prompts": {},
+  "humans": {
+    "h_109b1ff55ecf1c": {
+      "author": "lixuefei.nice <lixuefei.nice@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
