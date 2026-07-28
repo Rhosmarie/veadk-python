@@ -1,0 +1,43 @@
+tests/tools/builtin_tools/test_run_sandbox_agent.py
+  s_64543e41c35ae0::t_c7ab3576c05f7f 80
+  s_64543e41c35ae0::t_e073767e1e4aa8 251,261,270,308,336,340,348-349,351,353,360-361
+  s_64543e41c35ae0::t_d4b934b261a99d 248-250
+  s_64543e41c35ae0::t_88250e4de7ca82 252-254,258-260
+  s_64543e41c35ae0::t_70c94923b8e6b5 262-264,267-269
+veadk/tools/builtin_tools/execute_skills.py
+  s_64543e41c35ae0::t_ee43d7b6ec4985 111,118,138,167-169,196,200,204,210,227-228,233
+  s_64543e41c35ae0::t_c2aaa496bd4dd4 109-110
+  s_64543e41c35ae0::t_fc533c96bea925 234
+frontend/src/adk/runSseError.ts
+  s_0ed2136d0dae0d::t_3393983ffa5339 10,13
+tests/tools/builtin_tools/test_agentkit.py
+  s_0ed2136d0dae0d::t_49df94e6056905 300-356
+veadk/tools/builtin_tools/_agentkit.py
+  s_0ed2136d0dae0d::t_c2eb0ddcf9317f 239-248,251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cda9b9579c730521d0805bd09a383d0166346c56",
+  "prompts": {},
+  "sessions": {
+    "s_0ed2136d0dae0d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa8fd-a566-7fa2-99c1-5df5c6449dd0",
+        "model": "unknown"
+      },
+      "human_author": "lixuefei.nice <lixuefei.nice@bytedance.com>"
+    },
+    "s_64543e41c35ae0": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a68aad407cfca7145442d1c",
+        "model": "openrouter-2o__dev"
+      },
+      "human_author": null
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
