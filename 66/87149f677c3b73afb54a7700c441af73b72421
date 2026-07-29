@@ -1,0 +1,27 @@
+tests/tools/builtin_tools/test_agentkit.py
+  s_6e0726911191de::t_98493b82ee3941 301,325-326,365,422,477
+tests/tools/builtin_tools/test_run_sandbox_agent.py
+  s_6e0726911191de::t_5d1fdb77df7ba7 218,235-237,247
+veadk/tools/builtin_tools/_agentkit.py
+  s_6e0726911191de::t_8e616d8ad0c9d5 224,228,232-236,254-277
+veadk/tools/builtin_tools/execute_skills.py
+  s_6e0726911191de::t_a5b06ad0f27b95 246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6687149f677c3b73afb54a7700c441af73b72421",
+  "prompts": {},
+  "sessions": {
+    "s_6e0726911191de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa924-3597-7b13-bdc2-e2b3fcc0daba",
+        "model": "unknown"
+      },
+      "human_author": "lixuefei.nice <lixuefei.nice@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
