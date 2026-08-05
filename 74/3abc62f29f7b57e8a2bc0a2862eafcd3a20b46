@@ -1,0 +1,23 @@
+veadk/a2a/remote_ve_agent.py
+  s_536c3abc054ad7::t_58b2f33a2e9383 48,72,286
+veadk/tools/builtin_tools/execute_skills.py
+  s_536c3abc054ad7::t_65ef15419ec6cf 85,315,334,372,462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "743abc62f29f7b57e8a2bc0a2862eafcd3a20b46",
+  "prompts": {},
+  "sessions": {
+    "s_536c3abc054ad7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd0d9-e1cc-75e0-adfe-645051d3e682",
+        "model": "unknown"
+      },
+      "human_author": "lixuefei.nice <lixuefei.nice@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
