@@ -42,6 +42,25 @@ class SkillService:
             author=None if identity.is_admin else identity.author,
         )
 
+    def list_skills(
+        self,
+        identity: SkillIdentity,
+        *,
+        region: str,
+        page: int,
+        page_size: int,
+        project_name: str | None,
+        query: str | None,
+    ) -> dict[str, object]:
+        return self._repository.list_skills(
+            region=region,
+            page=page,
+            page_size=page_size,
+            project_name=project_name,
+            query=query,
+            author=None if identity.is_admin else identity.author,
+        )
+
     def create_space(
         self,
         identity: SkillIdentity,

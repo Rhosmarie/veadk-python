@@ -31,7 +31,7 @@ export interface LibraryResourceCardProps {
   description: string;
   metadata: readonly LibraryResourceCardMetadata[];
   detailAction: LibraryResourceCardAction;
-  action: LibraryResourceCardAction;
+  action: LibraryResourceCardAction | readonly LibraryResourceCardAction[];
 }
 
 export function LibraryResourceCard({
@@ -43,6 +43,7 @@ export function LibraryResourceCard({
   detailAction,
   action,
 }: LibraryResourceCardProps) {
+  const actions = Array.isArray(action) ? action : [action];
   return (
     <ResourceCard
       className={`library-resource-card ${className}`.trim()}
@@ -59,13 +60,20 @@ export function LibraryResourceCard({
         />
       )}
       actions={(
-        <ResourceCardRevealAction
-          label={`${action.label} ${title}`}
-          icon={action.icon}
-          disabled={action.disabled}
-          title={action.title}
-          onClick={action.onClick}
-        />
+        <>
+          {actions.map((item) => (
+            <ResourceCardRevealAction
+              key={item.label}
+              label={`${item.label} ${title}`}
+              icon={item.icon}
+              disabled={item.disabled}
+              title={item.title}
+              onClick={item.onClick}
+            >
+              {item.label}
+            </ResourceCardRevealAction>
+          ))}
+        </>
       )}
     >
       <ResourceCardHeader

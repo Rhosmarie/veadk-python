@@ -12,12 +12,15 @@
 }
 
 .library-view.is-detail .library-panels,
-.library-view.is-detail .library-panel {
+.library-view.is-detail .library-panel,
+.skills-view.is-detail .library-panels,
+.skills-view.is-detail .library-panel {
   min-height: 0;
 }
 
 .library-view.is-detail .library-panel > .skillcenter:not(.resource-collection),
-.library-view.is-detail .library-panel > .knowledge-library:not(.resource-collection) {
+.library-view.is-detail .library-panel > .knowledge-library:not(.resource-collection),
+.skills-view.is-detail .library-panel > .skillcenter:not(.resource-collection) {
   flex: 1;
   min-width: 0;
   min-height: 0;

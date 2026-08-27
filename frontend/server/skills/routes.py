@@ -142,6 +142,27 @@ def mount_skill_routes(
             )
         )
 
+    @app.get("/web/skill-management/skills")
+    async def list_skills(
+        request: Request,
+        region: str = Query(min_length=1, max_length=64),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        project: str | None = Query(default=None, max_length=256),
+        query: str | None = Query(default=None, max_length=256),
+    ) -> dict[str, object]:
+        identity = identity_resolver(request)
+        return await invoke(
+            lambda: service.list_skills(
+                identity,
+                region=region,
+                page=page,
+                page_size=page_size,
+                project_name=(project or "").strip() or None,
+                query=(query or "").strip() or None,
+            )
+        )
+
     @app.post("/web/skill-management/spaces")
     async def create_space(
         body: CreateSkillSpaceBody,

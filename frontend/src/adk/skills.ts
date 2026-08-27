@@ -1,7 +1,7 @@
 import { withAuth } from "./auth";
 import { withLocalUser } from "./identity";
 import { DEFAULT_REQUEST_TIMEOUT_MS, requestSignal, TRANSFER_REQUEST_TIMEOUT_MS } from "./timeout";
-import type { SkillSpacePage, SkillSpaceRef } from "../create/skills/skillspace";
+import type { SkillSpacePage, SkillSpaceRef, SkillSpaceSkill } from "../create/skills/skillspace";
 
 const API_ROOT = "/web/skill-management";
 
@@ -91,6 +91,27 @@ export async function listManagedSkillSpaces(args: {
   return json(
     await request(`/spaces?${params}`, { signal: args.signal }),
     "读取 Skill 空间失败",
+  );
+}
+
+export async function listManagedSkills(args: {
+  region: string;
+  page: number;
+  pageSize: number;
+  project?: string;
+  query?: string;
+  signal?: AbortSignal;
+}): Promise<SkillSpacePage<SkillSpaceSkill>> {
+  const params = new URLSearchParams({
+    region: args.region,
+    page: String(args.page),
+    page_size: String(args.pageSize),
+  });
+  if (args.project) params.set("project", args.project);
+  if (args.query) params.set("query", args.query);
+  return json(
+    await request(`/skills?${params}`, { signal: args.signal }),
+    "读取 Skill 失败",
   );
 }
 

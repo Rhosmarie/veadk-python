@@ -518,6 +518,103 @@ class _FakeSkillRequest:
             setattr(self, _pascal_to_snake(key), value)
 
 
+def test_repository_lists_skills_directly_without_space_scan() -> None:
+    requests: list[object] = []
+
+    class _FakeClient:
+        def list_skills(self, request: object) -> SimpleNamespace:
+            requests.append(request)
+            return SimpleNamespace(
+                total_count=1,
+                items=[
+                    SimpleNamespace(
+                        skill_id="skill-1",
+                        skill_name="webapp-testing",
+                        skill_description="Test local web apps",
+                        version="1.0.0",
+                        skill_status="Published",
+                        skill_space_id="space-1",
+                        skill_space_name="平台预置",
+                    )
+                ],
+            )
+
+        def list_skill_spaces(self, request: object) -> SimpleNamespace:
+            del request
+            raise AssertionError("top-level Skills must not scan Skill Spaces")
+
+    class _FakeTypes:
+        ListSkillsRequest = _FakeSkillRequest
+        SkillFilter = _FakeSkillRequest
+        TagFilterForSkill = _FakeSkillRequest
+
+    repository = AgentKitSkillRepository(lambda region: _FakeClient())
+
+    original_modules = {
+        name: sys.modules.get(name)
+        for name in [
+            "agentkit",
+            "agentkit.sdk",
+            "agentkit.sdk.skills",
+            "agentkit.sdk.skills.types",
+        ]
+    }
+    try:
+        agentkit = ModuleType("agentkit")
+        sdk = ModuleType("agentkit.sdk")
+        skills = ModuleType("agentkit.sdk.skills")
+        skills.types = _FakeTypes
+        sdk.skills = skills
+        agentkit.sdk = sdk
+        sys.modules.update(
+            {
+                "agentkit": agentkit,
+                "agentkit.sdk": sdk,
+                "agentkit.sdk.skills": skills,
+                "agentkit.sdk.skills.types": _FakeTypes,
+            }
+        )
+
+        result = repository.list_skills(
+            region="cn-beijing",
+            page=2,
+            page_size=20,
+            project_name="default",
+            author="person@example.com",
+            query="webapp",
+        )
+    finally:
+        for name, module in original_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+    assert result == {
+        "items": [
+            {
+                "skillId": "skill-1",
+                "skillName": "webapp-testing",
+                "skillDescription": "Test local web apps",
+                "version": "1.0.0",
+                "skillStatus": "Published",
+                "skillSpaceId": "space-1",
+                "skillSpaceName": "平台预置",
+                "region": "cn-beijing",
+            }
+        ],
+        "totalCount": 1,
+        "page": 2,
+        "pageSize": 20,
+    }
+    assert requests[0].page_number == 2
+    assert requests[0].page_size == 20
+    assert requests[0].filter.name == "webapp"
+    assert requests[0].project_name == "default"
+    assert requests[0].tag_filters[0].key == "author"
+    assert requests[0].tag_filters[0].values == ["person@example.com"]
+
+
 def _pascal_to_snake(value: str) -> str:
     result = []
     for index, char in enumerate(value):

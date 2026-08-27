@@ -13,6 +13,12 @@ test("adds one workspace sidebar entry with the former environment icon", () => 
   assert.match(sidebarSource, /onClick=\{onWorkspace\}/);
   assert.match(sidebarSource, /aria-label="工作区"/);
   assert.match(sidebarSource, /<Box className="icon" \/>/);
+  const agentsIndex = sidebarSource.indexOf('aria-label="智能体"');
+  const skillsIndex = sidebarSource.indexOf('aria-label="Skills"');
+  const workspacesIndex = sidebarSource.indexOf('aria-label="工作区"');
+  assert.equal(agentsIndex >= 0, true);
+  assert.equal(skillsIndex > agentsIndex, true);
+  assert.equal(workspacesIndex > skillsIndex, true);
   assert.doesNotMatch(sidebarSource, />环境<\/span>/);
   assert.match(appSource, /<WorkspaceCenter cloudProvider=\{cloudProvider\} \/>/);
 });

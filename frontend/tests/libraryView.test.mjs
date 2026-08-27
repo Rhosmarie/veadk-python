@@ -24,9 +24,9 @@ const sidebarSource = readFileSync(
   "utf8",
 );
 
-test("moves the Skill entry into the Library shell", () => {
+test("keeps the Library shell while Skills also has a top-level entry", () => {
   assert.match(sidebarSource, /\| "library"/);
-  assert.doesNotMatch(sidebarSource, /\| "skills"/);
+  assert.match(sidebarSource, /\| "skills"/);
   assert.match(
     sidebarSource,
     /new-chat--library\$\{[\s\S]*?activePage === "library" \? " is-active" : ""/,
@@ -34,11 +34,15 @@ test("moves the Skill entry into the Library shell", () => {
   assert.match(sidebarSource, /onClick=\{onLibrary\}/);
   assert.match(sidebarSource, /aria-label="资源库"/);
   assert.match(sidebarSource, />资源库<\/span>/);
+  assert.match(sidebarSource, /onClick=\{onSkills\}/);
+  assert.match(sidebarSource, /aria-label="Skills"/);
+  assert.match(sidebarSource, />Skills<\/span>/);
   assert.match(
     appSource,
-    /const sidebarActivePage: SidebarPage =[\s\S]*?: skillCenter\s*\? "library"/,
+    /const sidebarActivePage: SidebarPage =[\s\S]*?: skillCenter\s*\? skillCenterNavPage/,
   );
   assert.match(appSource, /<LibraryView[\s\S]*?cloudProvider=\{cloudProvider\}/);
+  assert.match(appSource, /<SkillsView[\s\S]*?cloudProvider=\{cloudProvider\}/);
 });
 
 test("renders the three Library sections with the shared resource tabs", () => {
@@ -53,6 +57,9 @@ test("renders the three Library sections with the shared resource tabs", () => {
   assert.match(resourceSource, /role="tablist"/);
   assert.match(resourceSource, /aria-selected=\{value === item\.id\}/);
   assert.match(librarySource, /<SkillCenterView/);
+  assert.match(librarySource, /<SkillListView/);
+  assert.match(librarySource, /export function SkillsView/);
+  assert.match(librarySource, /title="Skills"/);
   assert.match(
     librarySource,
     /<KnowledgeLibrary[\s\S]*?cloudProvider=\{cloudProvider\}[\s\S]*?active=\{activeTab === "knowledge"\}[\s\S]*?activationRevision=\{activationRevisions\.knowledge\}/,

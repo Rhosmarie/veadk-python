@@ -149,6 +149,47 @@ class AgentKitSkillRepository:
             "pageSize": page_size,
         }
 
+    def list_skills(
+        self,
+        *,
+        region: str,
+        page: int,
+        page_size: int,
+        project_name: str | None,
+        author: str | None,
+        query: str | None = None,
+    ) -> dict[str, object]:
+        from agentkit.sdk.skills import types as skills_types
+
+        tag_filters = None
+        if author:
+            tag_filters = [
+                skills_types.TagFilterForSkill(Key="author", Values=[author])
+            ]
+        request_args: dict[str, object] = {
+            "PageNumber": page,
+            "PageSize": page_size,
+            "ProjectName": project_name,
+            "TagFilters": tag_filters,
+        }
+        if query:
+            request_args["Filter"] = skills_types.SkillFilter(Name=query)
+        try:
+            request = skills_types.ListSkillsRequest(**request_args)
+        except TypeError:
+            request_args.pop("Filter", None)
+            request = skills_types.ListSkillsRequest(**request_args)
+        response = self._client_factory(region).list_skills(request)
+        items = list(response.items or [])
+        return {
+            "items": [self._skill_item(item, region) for item in items],
+            "totalCount": response.total_count
+            if response.total_count is not None
+            else len(items),
+            "page": page,
+            "pageSize": page_size,
+        }
+
     def create_space(
         self,
         *,
@@ -548,6 +589,66 @@ class AgentKitSkillRepository:
             or getattr(value, "Name", None)
             or ""
         )
+
+    @staticmethod
+    def _skill_item(value: Any, region: str) -> dict[str, object]:
+        spaces = (
+            getattr(value, "skill_spaces", None)
+            or getattr(value, "skillSpaces", None)
+            or getattr(value, "skill_space_ids", None)
+            or getattr(value, "SkillSpaces", None)
+            or []
+        )
+        first_space = spaces[0] if isinstance(spaces, list) and spaces else None
+        skill_space_id = str(
+            getattr(value, "skill_space_id", None)
+            or getattr(value, "skillSpaceId", None)
+            or getattr(first_space, "id", None)
+            or getattr(first_space, "skill_space_id", None)
+            or ""
+        )
+        skill_space_name = str(
+            getattr(value, "skill_space_name", None)
+            or getattr(value, "skillSpaceName", None)
+            or getattr(first_space, "name", None)
+            or getattr(first_space, "skill_space_name", None)
+            or ""
+        )
+        return {
+            "skillId": str(
+                getattr(value, "skill_id", None)
+                or getattr(value, "id", None)
+                or getattr(value, "skillId", None)
+                or ""
+            ),
+            "skillName": str(
+                getattr(value, "skill_name", None)
+                or getattr(value, "name", None)
+                or getattr(value, "skillName", None)
+                or ""
+            ),
+            "skillDescription": str(
+                getattr(value, "skill_description", None)
+                or getattr(value, "description", None)
+                or getattr(value, "skillDescription", None)
+                or ""
+            ),
+            "version": str(
+                getattr(value, "version", None)
+                or getattr(value, "current_version", None)
+                or getattr(value, "latest_version", None)
+                or ""
+            ),
+            "skillStatus": str(
+                getattr(value, "skill_status", None)
+                or getattr(value, "status", None)
+                or getattr(value, "skillStatus", None)
+                or ""
+            ),
+            "skillSpaceId": skill_space_id,
+            "skillSpaceName": skill_space_name,
+            "region": region,
+        }
 
     @staticmethod
     def _space_item(value: Any, region: str) -> dict[str, object]:

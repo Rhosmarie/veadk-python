@@ -13,6 +13,7 @@ import {
   deleteManagedSkill,
   downloadManagedSkillArchive,
   getManagedSkillFiles,
+  listManagedSkills,
   listManagedSkillSpaces,
   type ManagedSkillFile,
 } from "../adk/skills";
@@ -23,6 +24,13 @@ import {
   type CloudProvider,
   type CloudRegion,
 } from "../adk/cloudProvider";
+import {
+  sandboxClient,
+  sandboxStatusLabel,
+  type SandboxSession,
+} from "../adk/sandbox";
+import type { Block } from "../blocks";
+import { Blocks } from "./Blocks";
 import { getSkillWorkbenchCapability } from "./skill-workbench/api";
 import type {
   SkillCenterOptimizationSource,
@@ -56,6 +64,7 @@ import "./skills/skills.css";
 
 const SPACE_PAGE_SIZE = 12;
 const SKILL_PAGE_SIZE = 12;
+const SKILL_LIST_PAGE_SIZE = 24;
 
 type SkillRegion = string;
 
@@ -179,6 +188,10 @@ function skillDescriptionLabel(value?: string): string {
   return !description || [">", ">-", "|", "|-"].includes(description)
     ? "暂无描述"
     : description;
+}
+
+function managedSkillSpaceId(skill: SkillSpaceSkill): string {
+  return skill.skillSpaceId || "__managed_skill__";
 }
 
 function CloseIcon() {
@@ -449,12 +462,514 @@ function AddSkillDialog({
   );
 }
 
+interface SkillExperienceTurn {
+  id: string;
+  role: "user" | "assistant";
+  text?: string;
+  blocks?: Block[];
+}
+
+function SkillExperiencePanel({
+  skill,
+  onBack,
+}: {
+  skill: SkillSpaceSkill;
+  onBack: () => void;
+}) {
+  const [session, setSession] = useState<SandboxSession | null>(null);
+  const [turns, setTurns] = useState<SkillExperienceTurn[]>([]);
+  const [input, setInput] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const skillName = skill.skillName || skill.skillId;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setStarting(true);
+    setError(null);
+    void sandboxClient.startSession({
+      displayName: `${skillName} 体验`,
+      persistent: false,
+      signal: controller.signal,
+    })
+      .then((created) => sandboxClient.connectSession(created.id, { signal: controller.signal }))
+      .then((connected) => {
+        if (!controller.signal.aborted) setSession(connected);
+      })
+      .catch((cause: unknown) => {
+        if ((cause as Error)?.name === "AbortError") return;
+        setError(cause instanceof Error ? cause : new Error(String(cause)));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setStarting(false);
+      });
+    return () => {
+      controller.abort();
+      requestRef.current = null;
+    };
+  }, [skillName]);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({
+      top: transcriptRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [turns, sending]);
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || !session || sending) return;
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    setInput("");
+    setSending(true);
+    setError(null);
+    const userTurnId = crypto.randomUUID();
+    const assistantTurnId = crypto.randomUUID();
+    setTurns((current) => [
+      ...current,
+      { id: userTurnId, role: "user", text },
+      { id: assistantTurnId, role: "assistant", blocks: [] },
+    ]);
+    try {
+      const reply = await sandboxClient.sendMessage(
+        {
+          sessionId: session.id,
+          text,
+          skillIds: [skill.skillId],
+        },
+        {
+          signal: controller.signal,
+          onBlocks: (blocks) => {
+            if (controller.signal.aborted || requestRef.current !== controller) return;
+            setTurns((current) => current.map((turn) =>
+              turn.id === assistantTurnId ? { ...turn, blocks } : turn,
+            ));
+          },
+        },
+      );
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      setTurns((current) => current.map((turn) =>
+        turn.id === assistantTurnId ? { ...turn, blocks: reply.blocks } : turn,
+      ));
+    } catch (cause: unknown) {
+      if ((cause as Error)?.name === "AbortError") return;
+      setError(cause instanceof Error ? cause : new Error(String(cause)));
+      setTurns((current) => current.filter((turn) => turn.id !== assistantTurnId));
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setSending(false);
+      }
+    }
+  };
+
+  const status = session ? sandboxStatusLabel(session.status) : starting ? "创建中" : "未连接";
+
+  return (
+    <section className="skill-experience">
+      <header className="skill-experience__header">
+        <div className="skill-experience__heading">
+          <button type="button" onClick={onBack} aria-label="返回 Skill 列表">
+            <ArrowIcon direction="left" />
+          </button>
+          <div>
+            <h1>{skillName}</h1>
+            <p>{skillDescriptionLabel(skill.skillDescription)}</p>
+          </div>
+        </div>
+        <span className="skill-experience__status">{status}</span>
+      </header>
+
+      <div ref={transcriptRef} className="skill-experience__transcript" aria-label="Skill 部署体验对话">
+        {turns.length === 0 ? (
+          <div className="skill-experience__empty">
+            {starting ? "正在创建 Skills Sandbox…" : "输入一条消息，直接体验这个 Skill。"}
+          </div>
+        ) : turns.map((turn) => (
+          <div key={turn.id} className={`skill-experience__turn is-${turn.role}`}>
+            {turn.role === "user" ? (
+              <div className="skill-experience__bubble">{turn.text}</div>
+            ) : turn.blocks && turn.blocks.length > 0 ? (
+              <div className="skill-experience__bubble">
+                <Blocks blocks={turn.blocks} streaming={sending} onAction={() => {}} />
+              </div>
+            ) : (
+              <div className="skill-experience__bubble is-loading"><LoadingMark />正在生成…</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {error ? (
+        <div className="skillcenter-inline-error" role="alert">
+          <SkillErrorDetails error={error} />
+        </div>
+      ) : null}
+
+      <form
+        className="skill-experience__composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void sendMessage();
+        }}
+      >
+        <textarea
+          value={input}
+          rows={1}
+          disabled={!session || starting || sending}
+          placeholder={session ? "输入消息体验 Skill" : "等待 Sandbox 就绪"}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void sendMessage();
+            }
+          }}
+        />
+        <button type="submit" disabled={!session || starting || sending || !input.trim()}>
+          {sending ? "发送中…" : "发送"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
 export interface SkillCenterWorkspaceLaunch {
   operation: "create" | "optimize";
   initialIntent?: string;
   space?: SkillSpaceRef;
   source?: SkillCenterOptimizationSource;
   selectPublishSpace?: boolean;
+}
+
+export function SkillListView({
+  cloudProvider = "volcengine",
+  region,
+  active = true,
+  activationRevision = 0,
+  initialWorkspace = null,
+  onInitialWorkspaceConsumed,
+  onPageTitleChange,
+  toolbarFilters,
+}: {
+  cloudProvider?: CloudProvider;
+  region: CloudRegion;
+  active?: boolean;
+  activationRevision?: number;
+  initialWorkspace?: SkillCenterWorkspaceLaunch | null;
+  onInitialWorkspaceConsumed?: () => void;
+  onPageTitleChange?: (title: string) => void;
+  toolbarFilters?: ReactNode;
+}) {
+  const [skills, setSkills] = useState<SkillSpaceSkill[]>([]);
+  const [skillPage, setSkillPage] = useState(1);
+  const [skillTotal, setSkillTotal] = useState(0);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState<Error | null>(null);
+  const [skillQuery, setSkillQuery] = useState("");
+  const [detailSkill, setDetailSkill] = useState<SkillSpaceSkill | null>(null);
+  const [detail, setDetail] = useState<SkillDetail | null>(null);
+  const [detailFiles, setDetailFiles] = useState<ManagedSkillFile[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<Error | null>(null);
+  const [experienceSkill, setExperienceSkill] = useState<SkillSpaceSkill | null>(null);
+  const [workspace, setWorkspace] = useState<SkillCenterWorkspaceLaunch | null>(initialWorkspace);
+  const [skillRevision, setSkillRevision] = useState(0);
+  const detailRequest = useRef(0);
+  const deferredSkillQuery = useDeferredValue(skillQuery);
+  const workspaceTitle = workspace?.operation === "create"
+    ? "创建技能"
+    : workspace?.operation === "optimize"
+      ? `优化 ${workspace.source?.name || "技能"}`
+      : "";
+  const pageTitle = workspaceTitle || "Skills";
+
+  useEffect(() => {
+    if (active) onPageTitleChange?.(experienceSkill ? `${experienceSkill.skillName || "Skill"} 体验` : pageTitle);
+  }, [active, experienceSkill, onPageTitleChange, pageTitle]);
+
+  useEffect(() => {
+    if (initialWorkspace) onInitialWorkspaceConsumed?.();
+  }, [initialWorkspace, onInitialWorkspaceConsumed]);
+
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    setSkillsLoading(true);
+    setSkillsError(null);
+    void listManagedSkills({
+      region,
+      page: skillPage,
+      pageSize: SKILL_LIST_PAGE_SIZE,
+      query: deferredSkillQuery.trim() || undefined,
+      signal: controller.signal,
+    })
+      .then((result) => {
+        setSkills(result.items || []);
+        setSkillTotal(result.totalCount || 0);
+      })
+      .catch((error: unknown) => {
+        if ((error as Error)?.name === "AbortError") return;
+        setSkills([]);
+        setSkillTotal(0);
+        setSkillsError(normalizeSkillError(error, "读取 Skill 失败，请稍后重试"));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSkillsLoading(false);
+      });
+    return () => controller.abort();
+  }, [active, activationRevision, deferredSkillQuery, region, skillPage, skillRevision]);
+
+  useEffect(() => {
+    setSkillPage(1);
+  }, [deferredSkillQuery, region]);
+
+  const spaceForSkill = (skill: SkillSpaceSkill): SkillSpaceRef => ({
+    id: managedSkillSpaceId(skill),
+    name: skill.skillSpaceName || "未知空间",
+    description: "",
+    status: "",
+    region: skill.region || region,
+  });
+
+  const closeDetail = () => {
+    detailRequest.current += 1;
+    setDetailSkill(null);
+    setDetail(null);
+    setDetailFiles([]);
+    setDetailError(null);
+    setDetailLoading(false);
+  };
+
+  const openDetail = async (skill: SkillSpaceSkill) => {
+    const request = detailRequest.current + 1;
+    detailRequest.current = request;
+    setDetailSkill(skill);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const skillRegion = skill.region || region;
+      const filesPromise = getManagedSkillFiles({
+        spaceId: managedSkillSpaceId(skill),
+        skillId: skill.skillId,
+        version: skill.version,
+        region: skillRegion,
+        skillSpaceName: skill.skillSpaceName,
+        skillName: skill.skillName,
+      });
+      const detailPromise = skill.skillSpaceId
+        ? getSkillDetail(
+            skill.skillSpaceId,
+            skill.skillId,
+            skill.version,
+            skillRegion,
+            undefined,
+            skill.skillName,
+            skill.skillSpaceName,
+          )
+        : Promise.resolve({
+            skillId: skill.skillId,
+            skillSpaceId: managedSkillSpaceId(skill),
+            name: skill.skillName,
+            description: skill.skillDescription,
+            version: skill.version,
+            skillMd: "",
+            bucketName: "",
+            tosPath: "",
+          });
+      const [result, files] = await Promise.all([detailPromise, filesPromise]);
+      if (detailRequest.current === request) {
+        setDetail(result);
+        setDetailFiles(files);
+      }
+    } catch (error) {
+      if (detailRequest.current === request) {
+        setDetailError(normalizeSkillError(error, "读取技能详情失败，请稍后重试"));
+      }
+    } finally {
+      if (detailRequest.current === request) setDetailLoading(false);
+    }
+  };
+
+  if (workspace?.operation === "optimize") {
+    return (
+      <SkillGenerationWorkspace
+        operation={workspace.operation}
+        cloudProvider={cloudProvider}
+        initialIntent={workspace.initialIntent}
+        source={workspace.source}
+        onBack={() => setWorkspace(null)}
+        onPublished={() => setSkillPage(1)}
+      />
+    );
+  }
+
+  if (workspace?.operation === "create") {
+    return (
+      <SkillCenterView
+        cloudProvider={cloudProvider}
+        region={region}
+        active={active}
+        activationRevision={activationRevision}
+        initialWorkspace={workspace}
+        onInitialWorkspaceConsumed={onInitialWorkspaceConsumed}
+        onPageTitleChange={onPageTitleChange}
+        toolbarFilters={toolbarFilters}
+      />
+    );
+  }
+
+  if (experienceSkill) {
+    return (
+      <SkillExperiencePanel
+        skill={experienceSkill}
+        onBack={() => setExperienceSkill(null)}
+      />
+    );
+  }
+
+  if (detailSkill) {
+    const detailRegion = detailSkill.region || region;
+    const detailSpace = spaceForSkill(detailSkill);
+    return (
+      <section className="skillcenter is-space">
+        <ResourceDetail>
+          <ResourceDetailHeader>
+            <ResourceDetailHeading
+              title={detail?.name || detailSkill.skillName}
+              description={skillDescriptionLabel(detail?.description || detailSkill.skillDescription)}
+              backLabel="返回 Skill 列表"
+              onBack={closeDetail}
+            />
+            <ResourceDetailActions>
+              <button
+                type="button"
+                onClick={() => void downloadManagedSkillArchive({
+                  spaceId: managedSkillSpaceId(detailSkill),
+                  skillId: detailSkill.skillId,
+                  version: detailSkill.version,
+                  region: detailRegion,
+                  fallbackName: detailSkill.skillName,
+                  skillSpaceName: detailSkill.skillSpaceName,
+                  skillName: detailSkill.skillName,
+                }).catch((error: unknown) => setDetailError(normalizeSkillError(error, "下载 Skill 失败")))}
+              disabled={detailFiles.length === 0}
+              >
+                下载 ZIP
+              </button>
+              <button
+                type="button"
+                onClick={() => setExperienceSkill(detailSkill)}
+              >
+                部署体验
+              </button>
+            </ResourceDetailActions>
+          </ResourceDetailHeader>
+          <ResourceDetailBody>
+            <ResourceDetailSummary className="skillcenter-detail-facts">
+              <div><dt>技能 ID</dt><dd title={detailSkill.skillId}>{detailSkill.skillId}</dd></div>
+              <div><dt>版本</dt><dd>{detail?.version || detailSkill.version || "—"}</dd></div>
+              <div><dt>状态</dt><dd>{statusLabel(detailSkill.skillStatus)}</dd></div>
+              <div><dt>技能空间</dt><dd title={detailSpace.name}>{detailSpace.name}</dd></div>
+              <div><dt>地域</dt><dd>{formatCloudRegion(detailRegion, cloudProvider)}</dd></div>
+            </ResourceDetailSummary>
+            <section className="skill-detail-content skill-detail-content--files">
+              <ResourceDetailSectionHeader title="完整文件" />
+              {detailLoading ? (
+                <div className="skillcenter-loading"><LoadingMark />正在读取技能内容…</div>
+              ) : detailError ? (
+                <div className="skillcenter-error"><SkillErrorDetails error={detailError} /></div>
+              ) : detailFiles.length > 0 ? (
+                <SkillFileTree files={detailFiles.map((file) => file.path.endsWith("SKILL.md") && file.content ? { ...file, content: skillMarkdownBody(file.content) } : file)} />
+              ) : (
+                <EmptyState>该技能暂无 SKILL.md 内容</EmptyState>
+              )}
+            </section>
+          </ResourceDetailBody>
+        </ResourceDetail>
+      </section>
+    );
+  }
+
+  return (
+    <section className="skillcenter resource-collection">
+      <ResourceToolbar className="skillcenter-list-toolbar library-resource-toolbar">
+        <div className="resource-toolbar__actions">
+          {toolbarFilters}
+          <ResourceSearch
+            aria-label="搜索 Skill"
+            value={skillQuery}
+            onChange={(event) => setSkillQuery(event.target.value)}
+            placeholder="搜索 Skill"
+          />
+        </div>
+      </ResourceToolbar>
+
+      <ResourceResults className="skillcenter-list-results" aria-label="Skill 列表">
+        {skillsLoading && skills.length === 0 ? (
+          <div className="my-agent-initial-loading" role="status" aria-live="polite">
+            <span className="my-agent-loading-mark" aria-hidden="true" />
+            <span>正在加载 Skill</span>
+          </div>
+        ) : skillsError && skills.length === 0 ? (
+          <PageState
+            kind="error"
+            title="无法加载 Skill"
+            error={skillsError}
+            action={{ label: "重新加载", onClick: () => setSkillRevision((value) => value + 1) }}
+          />
+        ) : skills.length === 0 ? (
+          <PageState
+            kind="empty"
+            title={skillQuery.trim() ? "没有匹配的 Skill" : "暂无 Skill"}
+            description={skillQuery.trim() ? "请尝试搜索其他名称" : "请先创建或上传 Skill"}
+          />
+        ) : (
+          <ResourceGrid>
+            {skills.map((skill) => {
+              return (
+                <LibraryResourceCard
+                  key={`${skill.skillId}:${skill.version}:${skill.skillSpaceId || ""}`}
+                  className="skillcenter-skill-card"
+                  title={skill.skillName || skill.skillId}
+                  description={skillDescriptionLabel(skill.skillDescription)}
+                  metadata={[
+                    { label: "版本", value: skill.version || "—" },
+                    { label: "空间", value: skill.skillSpaceName || "未知空间" },
+                  ]}
+                  detailAction={{
+                    label: "查看详情",
+                    onClick: () => void openDetail(skill),
+                  }}
+                  action={[
+                    {
+                      label: "查看详情",
+                      onClick: () => void openDetail(skill),
+                    },
+                    {
+                      label: "部署体验",
+                      onClick: () => setExperienceSkill(skill),
+                    },
+                  ]}
+                />
+              );
+            })}
+          </ResourceGrid>
+        )}
+        {!skillQuery.trim() && !skillsLoading && !skillsError && skillTotal > 0 ? (
+          <Pager page={skillPage} total={skillTotal} pageSize={SKILL_LIST_PAGE_SIZE} onPage={setSkillPage} />
+        ) : null}
+      </ResourceResults>
+
+    </section>
+  );
 }
 
 /** Native AgentKit Skill space browser. */

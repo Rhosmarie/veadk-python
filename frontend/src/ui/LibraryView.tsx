@@ -20,6 +20,7 @@ import {
 } from "./artifactLibraryApi";
 import { KnowledgeLibrary } from "./KnowledgeLibrary";
 import {
+  SkillListView,
   SkillCenterView,
   type SkillCenterWorkspaceLaunch,
 } from "./SkillCenter";
@@ -53,6 +54,76 @@ export interface LibraryViewProps {
   onArtifactSourceOpen?: (appName: string, sessionId: string) => void;
 }
 
+export interface SkillsViewProps {
+  cloudProvider: CloudProvider;
+  studioRegion?: string;
+  initialWorkspace?: SkillCenterWorkspaceLaunch | null;
+  onInitialWorkspaceConsumed?: () => void;
+  onPageTitleChange?: (title: string) => void;
+}
+
+function useLibraryRegion(cloudProvider: CloudProvider, studioRegion = "") {
+  const configuredRegion = isSupportedCloudRegion(studioRegion)
+    ? studioRegion
+    : defaultCloudRegion(cloudProvider);
+  const [region, setRegion] = useState<CloudRegion>(configuredRegion);
+  const regionOptions = useMemo(() => cloudRegionOptions(cloudProvider), [cloudProvider]);
+
+  useEffect(() => {
+    setRegion(configuredRegion);
+  }, [configuredRegion]);
+
+  return { region, setRegion, regionOptions };
+}
+
+export function SkillsView({
+  cloudProvider,
+  studioRegion = "",
+  initialWorkspace = null,
+  onInitialWorkspaceConsumed,
+  onPageTitleChange,
+}: SkillsViewProps) {
+  const { region, setRegion, regionOptions } = useLibraryRegion(cloudProvider, studioRegion);
+  const [pageTitle, setPageTitle] = useState("Skills");
+  const detailActive = pageTitle !== "Skills" && pageTitle !== "技能库";
+
+  useEffect(() => {
+    onPageTitleChange?.(pageTitle);
+  }, [onPageTitleChange, pageTitle]);
+
+  return (
+    <ResourcePageShell className={`skills-view${detailActive ? " is-detail" : ""}`} aria-label="Skills">
+      {!detailActive ? (
+        <ResourcePageHeader
+          className="library-view__header"
+          title="Skills"
+        />
+      ) : null}
+      <div className="library-panels">
+        <div className="library-panel">
+          <SkillListView
+            cloudProvider={cloudProvider}
+            region={region}
+            active
+            onPageTitleChange={(title) => setPageTitle(title === "技能库" ? "Skills" : title)}
+            initialWorkspace={initialWorkspace}
+            onInitialWorkspaceConsumed={onInitialWorkspaceConsumed}
+            toolbarFilters={(
+              <ResourceFilterSelect
+                id="skills-region-filter"
+                ariaLabel="区域"
+                value={region}
+                options={regionOptions}
+                onChange={setRegion}
+              />
+            )}
+          />
+        </div>
+      </div>
+    </ResourcePageShell>
+  );
+}
+
 export function LibraryView({
   cloudProvider,
   studioRegion = "",
@@ -66,10 +137,7 @@ export function LibraryView({
   onArtifactActivate,
   onArtifactSourceOpen,
 }: LibraryViewProps) {
-  const configuredRegion = isSupportedCloudRegion(studioRegion)
-    ? studioRegion
-    : defaultCloudRegion(cloudProvider);
-  const [region, setRegion] = useState<CloudRegion>(configuredRegion);
+  const { region, setRegion, regionOptions } = useLibraryRegion(cloudProvider, studioRegion);
   const [skillPageTitle, setSkillPageTitle] = useState("技能库");
   const [knowledgeDetailActive, setKnowledgeDetailActive] = useState(false);
   const [mountedTabs, setMountedTabs] = useState<ReadonlySet<LibraryTab>>(
@@ -91,12 +159,6 @@ export function LibraryView({
     artifactCandidateCache.current = artifactCandidateSnapshot;
   }
   const artifactCandidates = artifactCandidateCache.current.candidates;
-  const regionOptions = useMemo(() => cloudRegionOptions(cloudProvider), [cloudProvider]);
-
-  useEffect(() => {
-    setRegion(configuredRegion);
-  }, [configuredRegion]);
-
   useEffect(() => {
     artifactActivateRef.current = onArtifactActivate;
   }, [onArtifactActivate]);

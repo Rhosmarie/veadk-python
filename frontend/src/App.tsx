@@ -88,7 +88,7 @@ import {
 import { Sidebar, type SidebarPage } from "./ui/Sidebar";
 import { AgentInfoPanel } from "./ui/AgentTopology";
 import type { SkillCenterWorkspaceLaunch } from "./ui/SkillCenter";
-import { LibraryView, type LibraryTab } from "./ui/LibraryView";
+import { LibraryView, SkillsView, type LibraryTab } from "./ui/LibraryView";
 import { AddAgentKitView } from "./ui/AddAgentKit";
 import { AgentWorkspace } from "./ui/AgentWorkspace";
 import {
@@ -350,6 +350,7 @@ type StudioPageId =
   | "sandbox"
   | "create"
   | "library"
+  | "skills"
   | "search"
   | "applications"
   | "cronjobs"
@@ -1897,6 +1898,7 @@ export default function App() {
   // flashing the notice in the common, configured case).
   const [hasCreds, setHasCreds] = useState(true);
   const [skillCenter, setSkillCenter] = useState(false);
+  const [skillCenterNavPage, setSkillCenterNavPage] = useState<"skills" | "library">("library");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("skills");
   const [libraryPageTitle, setLibraryPageTitle] = useState("技能库");
   const [skillCenterLaunch, setSkillCenterLaunch] =
@@ -5820,7 +5822,7 @@ export default function App() {
         : workspaceView
           ? "workspaces"
         : skillCenter
-          ? "library"
+          ? skillCenterNavPage
           : cronJobsView
             ? "cronjobs"
             : applicationsView
@@ -5848,7 +5850,7 @@ export default function App() {
       : workspaceView
         ? "workspaces"
       : skillCenter
-        ? "library"
+        ? skillCenterNavPage
         : cronJobsView
           ? "cronjobs"
           : applicationsView
@@ -5955,7 +5957,31 @@ export default function App() {
           setCronJobsView(false);
           setSkillCenterLaunch(null);
           setLibraryTab("skills");
+          setSkillCenterNavPage("library");
           setLibraryPageTitle("技能库");
+          setSkillCenter(true);
+          setError("");
+        })}
+        onSkills={() => requestIntelligentNavigation(() => {
+          if (sandboxSession) exitSandboxSession();
+          setCreateView(null);
+          setAddAgent(false);
+          setAddMenu(false);
+          setSearchView(false);
+          setManageAgents(false);
+          setAgentDetailTarget(null);
+          setSandboxAgentDetailTarget(null);
+          setSandboxAgentWorkspace(null);
+          setMyAgents(false);
+          setWorkspaceView(false);
+          setEnvironmentView(false);
+          setPageStack([]);
+          setApplicationsView(null);
+          setCronJobsView(false);
+          setSkillCenterLaunch(null);
+          setLibraryTab("skills");
+          setSkillCenterNavPage("skills");
+          setLibraryPageTitle("Skills");
           setSkillCenter(true);
           setError("");
         })}
@@ -6164,6 +6190,7 @@ export default function App() {
                   setError("");
                   setSkillCenterLaunch(launch);
                   setLibraryTab("skills");
+                  setSkillCenterNavPage("skills");
                   setLibraryPageTitle(
                     launch.operation === "create"
                       ? "创建技能"
@@ -6702,6 +6729,14 @@ export default function App() {
                   setAppName(id);
                 }}
                 onCancel={() => setAddAgent(false)}
+              />
+            ) : skillCenter && skillCenterNavPage === "skills" ? (
+              <SkillsView
+                cloudProvider={cloudProvider}
+                studioRegion={studioRegion || defaultCloudRegion(cloudProvider)}
+                initialWorkspace={skillCenterLaunch}
+                onInitialWorkspaceConsumed={() => setSkillCenterLaunch(null)}
+                onPageTitleChange={setLibraryPageTitle}
               />
             ) : skillCenter ? (
               <LibraryView

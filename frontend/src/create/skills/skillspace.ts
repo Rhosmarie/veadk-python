@@ -23,6 +23,9 @@ export interface SkillSpaceSkill {
   skillDescription: string;
   version: string;
   skillStatus: string;
+  skillSpaceId?: string;
+  skillSpaceName?: string;
+  region?: string;
 }
 export interface SkillDetail {
   skillId: string;

@@ -558,7 +558,7 @@ export function ResourceCardRevealAction({
   return (
     <ResourceCardAction
       className={className}
-      iconOnly
+      iconOnly={!children}
       tone="primary"
       aria-label={label}
       title={title ?? label}

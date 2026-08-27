@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   Box,
+  Blocks,
   Info,
   LogOut,
   MoreHorizontal,
@@ -42,6 +43,7 @@ const SIDEBAR_AUTO_COLLAPSE_QUERY = "(max-width: 860px)";
 export type SidebarPage =
   | "new-chat"
   | "agents"
+  | "skills"
   | "workspaces"
   | "environments"
   | "library"
@@ -102,6 +104,7 @@ export interface SidebarProps {
   onSearch: () => void;
   onQuickCreate: () => void;
   onLibrary: () => void;
+  onSkills: () => void;
   onAddAgent: () => void;
   onMyAgents: () => void;
   onWorkspace: () => void;
@@ -284,6 +287,7 @@ export function Sidebar({
   onSearch,
   onQuickCreate,
   onLibrary,
+  onSkills,
   onAddAgent,
   onMyAgents,
   onWorkspace,
@@ -400,6 +404,18 @@ export function Sidebar({
           >
             <SidebarAgentIcon className="icon" />
             <span className="sidebar-nav-label">智能体</span>
+          </button>
+          <button
+            className={`new-chat new-chat--skills${
+              activePage === "skills" ? " is-active" : ""
+            }`}
+            onClick={onSkills}
+            aria-label="Skills"
+            aria-current={activePage === "skills" ? "page" : undefined}
+            title="Skills"
+          >
+            <Blocks className="icon" />
+            <span className="sidebar-nav-label">Skills</span>
           </button>
           <button
             className={`new-chat new-chat--workspaces${

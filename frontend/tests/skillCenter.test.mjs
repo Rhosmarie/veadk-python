@@ -96,6 +96,13 @@ test("skill center uses the Studio page shell and opens spaces as a detail page"
 });
 
 test("space and skill requests are paged server-side without sending browser credentials", () => {
+  assert.match(managementClientSource, /export async function listManagedSkills/);
+  assert.match(managementClientSource, /\/skills\?\$\{params\}/);
+  assert.match(skillCenterSource, /export function SkillListView/);
+  assert.match(skillCenterSource, /listManagedSkills\(\{/);
+  assert.match(skillCenterSource, /setExperienceSkill\(skill\)/);
+  assert.match(skillCenterSource, /skillIds: \[skill\.skillId\]/);
+  assert.match(skillCenterSource, /aria-label="Skill 列表"/);
   assert.match(skillspaceSource, /export async function listSkillSpacesPage/);
   assert.match(skillspaceSource, /export async function listSkillsInSpacePage/);
   assert.match(skillspaceSource, /page_size: String\(options\.pageSize\)/);
@@ -110,6 +117,19 @@ test("space and skill requests are paged server-side without sending browser cre
   assert.doesNotMatch(skillCenterSource, /<Pager page=\{spacePage\}/);
   assert.match(skillCenterSource, /<Pager page=\{skillPage\}/);
   assert.doesNotMatch(skillCenterSource, /VOLCENGINE_ACCESS_KEY|VOLCENGINE_SECRET_KEY/);
+});
+
+test("top-level Skills search and card actions target Skills directly", () => {
+  assert.match(managementClientSource, /if \(args\.query\) params\.set\("query", args\.query\)/);
+  assert.match(skillCenterSource, /query: deferredSkillQuery\.trim\(\) \|\| undefined/);
+  assert.match(skillCenterSource, /detailAction=\{\{[\s\S]*?label: "查看详情"/);
+  assert.match(skillCenterSource, /action=\{\[[\s\S]*?label: "查看详情"[\s\S]*?label: "部署体验"/);
+  assert.doesNotMatch(
+    skillCenterSource,
+    /className="skillcenter-skill-card"[\s\S]{0,260}status=\{<span/,
+  );
+  assert.match(resourceCardSource, /const actions = Array\.isArray\(action\) \? action : \[action\]/);
+  assert.match(resourceCardSource, /<ResourceCardRevealAction[\s\S]*?\{item\.label\}[\s\S]*?<\/ResourceCardRevealAction>/);
 });
 
 test("Skill errors preserve and render upstream error details", () => {
@@ -158,14 +178,16 @@ test("skill details render external markdown with raw HTML disabled", () => {
   );
 });
 
-test("Library navigation replaces Skills immediately below agents", () => {
+test("Skills navigation sits between agents and workspaces", () => {
   const search = sidebarSource.indexOf('{show("search")');
   const agents = sidebarSource.indexOf('className={`new-chat new-chat--agents');
+  const skills = sidebarSource.indexOf('className={`new-chat new-chat--skills');
+  const workspaces = sidebarSource.indexOf('className={`new-chat new-chat--workspaces');
   const library = sidebarSource.indexOf('className={`new-chat new-chat--library');
   const cronJobs = sidebarSource.indexOf('aria-label="定时任务"', library);
 
   assert.ok(search >= 0 && agents > search);
-  assert.ok(library > agents && cronJobs > library);
+  assert.ok(skills > agents && workspaces > skills && library > workspaces && cronJobs > library);
   assert.match(
     sidebarSource,
     /import \{ Clock \} from "@openai\/apps-sdk-ui\/components\/Icon";/,
@@ -174,10 +196,8 @@ test("Library navigation replaces Skills immediately below agents", () => {
     sidebarSource,
     /import \{[\s\S]*?NewChatIcon,[\s\S]*?ResourceLibraryIcon,[\s\S]*?SidebarAgentIcon,[\s\S]*?\} from "\.\/icons\/SidebarIcons";/,
   );
-  assert.match(
-    sidebarSource.slice(agents, cronJobs),
-    /<ResourceLibraryIcon className="icon" \/>/,
-  );
+  assert.match(sidebarSource.slice(skills, workspaces), /<Blocks className="icon" \/>/);
+  assert.match(sidebarSource.slice(skills, workspaces), />Skills<\/span>/);
   assert.doesNotMatch(sidebarSource.slice(agents, cronJobs), /sidebar-nav-slot/);
   assert.match(sidebarSource.slice(agents, cronJobs), />资源库<\/span>/);
 });
@@ -349,13 +369,10 @@ test("skill space cards expose direct actions and structured metadata", () => {
   assert.doesNotMatch(skillCenterSource, /metadata=\{\[[\s\S]*?label: "地域"/);
   assert.doesNotMatch(skillCenterSource, /<small>Project<\/small>/);
   assert.doesNotMatch(skillCenterSource, /<span>地域<\/span>/);
-  const detailHeaderStart = skillCenterSource.indexOf("<ResourceDetailHeader>");
-  const detailHeaderEnd = skillCenterSource.indexOf("</ResourceDetailHeader>", detailHeaderStart);
-  const detailHeader = skillCenterSource.slice(detailHeaderStart, detailHeaderEnd);
-  assert.match(detailHeader, />\s*编辑空间\s*<\/button>/);
-  assert.match(detailHeader, /"删除中…" : "删除空间"/);
-  assert.match(detailHeader, />本地上传<\/button>/);
-  assert.match(detailHeader, />创建技能<\/span>/);
+  assert.match(skillCenterSource, />\s*编辑空间\s*<\/button>/);
+  assert.match(skillCenterSource, /"删除中…" : "删除空间"/);
+  assert.match(skillCenterSource, />本地上传<\/button>/);
+  assert.match(skillCenterSource, />创建技能<\/span>/);
 });
 
 test("Skill running states, actions, and candidate loading use the requested visual hierarchy", () => {
