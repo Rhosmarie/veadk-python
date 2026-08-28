@@ -491,14 +491,18 @@ function SkillExperiencePanel({
     requestRef.current = controller;
     setStarting(true);
     setError(null);
-    void sandboxClient.startSession({
+    void sandboxClient.startSkillSession({
       displayName: `${skillName} 体验`,
-      persistent: false,
+      skillSpaceId: managedSkillSpaceId(skill),
+      skillId: skill.skillId,
+      version: skill.version,
+      region: skill.region,
+      skillName: skill.skillName,
+      skillSpaceName: skill.skillSpaceName,
       signal: controller.signal,
     })
-      .then((created) => sandboxClient.connectSession(created.id, { signal: controller.signal }))
-      .then((connected) => {
-        if (!controller.signal.aborted) setSession(connected);
+      .then((created) => {
+        if (!controller.signal.aborted) setSession(created);
       })
       .catch((cause: unknown) => {
         if ((cause as Error)?.name === "AbortError") return;
@@ -537,11 +541,10 @@ function SkillExperiencePanel({
       { id: assistantTurnId, role: "assistant", blocks: [] },
     ]);
     try {
-      const reply = await sandboxClient.sendMessage(
+      const reply = await sandboxClient.sendSkillMessage(
         {
           sessionId: session.id,
           text,
-          skillIds: [skill.skillId],
         },
         {
           signal: controller.signal,

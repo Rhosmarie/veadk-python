@@ -1401,6 +1401,13 @@ def _serve_options(f):
             "(env: SANDBOX_CHAT_HERMES).",
         ),
         click.option(
+            "--sandbox-chat-skill-tool-id",
+            default=None,
+            envvar="SANDBOX_CHAT_SKILL",
+            help="AgentKit Skill/SkillEnv Tool ID used by Skill experience "
+            "(env: SANDBOX_CHAT_SKILL).",
+        ),
+        click.option(
             "--sandbox-chat-codex-snapshot-tool-id",
             default=None,
             envvar="SANDBOX_CHAT_CODEX_SNAPSHOT",
@@ -1479,6 +1486,7 @@ def frontend(
     sandbox_chat_codex_tool_id: str | None,
     sandbox_chat_openclaw_tool_id: str | None,
     sandbox_chat_hermes_tool_id: str | None,
+    sandbox_chat_skill_tool_id: str | None,
     sandbox_chat_codex_snapshot_tool_id: str | None,
     sandbox_chat_openclaw_snapshot_tool_id: str | None,
     sandbox_chat_hermes_snapshot_tool_id: str | None,
@@ -1511,6 +1519,7 @@ def frontend(
         sandbox_chat_codex_tool_id=sandbox_chat_codex_tool_id,
         sandbox_chat_openclaw_tool_id=sandbox_chat_openclaw_tool_id,
         sandbox_chat_hermes_tool_id=sandbox_chat_hermes_tool_id,
+        sandbox_chat_skill_tool_id=sandbox_chat_skill_tool_id,
         sandbox_chat_codex_snapshot_tool_id=sandbox_chat_codex_snapshot_tool_id,
         sandbox_chat_openclaw_snapshot_tool_id=(sandbox_chat_openclaw_snapshot_tool_id),
         sandbox_chat_hermes_snapshot_tool_id=sandbox_chat_hermes_snapshot_tool_id,
@@ -1547,6 +1556,7 @@ def studio(
     sandbox_chat_codex_tool_id: str | None,
     sandbox_chat_openclaw_tool_id: str | None,
     sandbox_chat_hermes_tool_id: str | None,
+    sandbox_chat_skill_tool_id: str | None,
     sandbox_chat_codex_snapshot_tool_id: str | None,
     sandbox_chat_openclaw_snapshot_tool_id: str | None,
     sandbox_chat_hermes_snapshot_tool_id: str | None,
@@ -1584,6 +1594,7 @@ def studio(
         sandbox_chat_codex_tool_id=sandbox_chat_codex_tool_id,
         sandbox_chat_openclaw_tool_id=sandbox_chat_openclaw_tool_id,
         sandbox_chat_hermes_tool_id=sandbox_chat_hermes_tool_id,
+        sandbox_chat_skill_tool_id=sandbox_chat_skill_tool_id,
         sandbox_chat_codex_snapshot_tool_id=sandbox_chat_codex_snapshot_tool_id,
         sandbox_chat_openclaw_snapshot_tool_id=(sandbox_chat_openclaw_snapshot_tool_id),
         sandbox_chat_hermes_snapshot_tool_id=sandbox_chat_hermes_snapshot_tool_id,
@@ -1616,6 +1627,7 @@ def _run_frontend_server(
     sandbox_chat_codex_tool_id: str | None = None,
     sandbox_chat_openclaw_tool_id: str | None = None,
     sandbox_chat_hermes_tool_id: str | None = None,
+    sandbox_chat_skill_tool_id: str | None = None,
     sandbox_chat_codex_snapshot_tool_id: str | None = None,
     sandbox_chat_openclaw_snapshot_tool_id: str | None = None,
     sandbox_chat_hermes_snapshot_tool_id: str | None = None,
@@ -1660,6 +1672,8 @@ def _run_frontend_server(
         os.environ["SANDBOX_CHAT_OPENCLAW"] = sandbox_chat_openclaw_tool_id
     if sandbox_chat_hermes_tool_id:
         os.environ["SANDBOX_CHAT_HERMES"] = sandbox_chat_hermes_tool_id
+    if sandbox_chat_skill_tool_id:
+        os.environ["SANDBOX_CHAT_SKILL"] = sandbox_chat_skill_tool_id
     if sandbox_chat_codex_snapshot_tool_id:
         os.environ["SANDBOX_CHAT_CODEX_SNAPSHOT"] = sandbox_chat_codex_snapshot_tool_id
     if sandbox_chat_openclaw_snapshot_tool_id:
@@ -2563,6 +2577,15 @@ def _run_frontend_server(
         tool_id=sandbox_chat_codex_tool_id,
         snapshot_tool_id=sandbox_chat_codex_snapshot_tool_id,
     )
+    skill_sandbox_service = SandboxConversationService(
+        sandbox_gateway,
+        tool_id=(
+            sandbox_chat_skill_tool_id
+            or (os.getenv("SANDBOX_CHAT_SKILL") or "").strip()
+        ),
+        snapshot_tool_id=None,
+        agent_kind="skill",
+    )
     sandbox_agent_services = {
         "deepseek-harness": SandboxAgentSessionService(
             sandbox_gateway,
@@ -2861,6 +2884,7 @@ def _run_frontend_server(
             True,
         ),
         ("openclaw", "OpenClaw Sandbox", "SANDBOX_CHAT_OPENCLAW", False),
+        ("skill", "Skill Sandbox", "SANDBOX_CHAT_SKILL", False),
         (
             "openclaw_snapshot",
             "OpenClaw Sandbox",
@@ -4011,6 +4035,18 @@ def _run_frontend_server(
 
     environment_service.set_skillspace_resolver(
         _resolve_skillspace_skill_materialization
+    )
+
+    from frontend.server.skills.sandbox_experience import (
+        mount_skill_sandbox_experience_routes,
+    )
+
+    mount_skill_sandbox_experience_routes(
+        app,
+        skill_sandbox_service,
+        _sandbox_owner,
+        _sandbox_creator,
+        _resolve_skillspace_skill_materialization,
     )
 
     async def _resolve_draft_environment(
@@ -11461,6 +11497,14 @@ def _resolve_studio_cloud_credentials(
     "Default: create one during deployment.",
 )
 @click.option(
+    "--sandbox-chat-skill-tool-id",
+    "sandbox_chat_skill_tool_id",
+    default=None,
+    envvar="SANDBOX_CHAT_SKILL",
+    help="Dedicated ready AgentKit Skill/SkillEnv Tool ID used by Skill experience. "
+    "Default: must be configured by the Studio administrator.",
+)
+@click.option(
     "--sandbox-chat-codex-snapshot-tool-id",
     "sandbox_chat_codex_snapshot_tool_id",
     default=None,
@@ -11532,6 +11576,7 @@ def frontend_deploy(
     sandbox_chat_codex_tool_id: str | None,
     sandbox_chat_openclaw_tool_id: str | None,
     sandbox_chat_hermes_tool_id: str | None,
+    sandbox_chat_skill_tool_id: str | None,
     sandbox_chat_codex_snapshot_tool_id: str | None,
     sandbox_chat_openclaw_snapshot_tool_id: str | None,
     sandbox_chat_hermes_snapshot_tool_id: str | None,
@@ -12066,6 +12111,8 @@ def frontend_deploy(
     veadk_environments["VEIDENTITY_REGION"] = identity_region
     if site_title is not None:
         veadk_environments["VEADK_SITE_TITLE"] = branding_title
+    if sandbox_chat_skill_tool_id:
+        veadk_environments["SANDBOX_CHAT_SKILL"] = sandbox_chat_skill_tool_id
     if studio_admins:
         veadk_environments["VEADK_STUDIO_ADMINS"] = studio_admins
     if studio_developers:

@@ -3,6 +3,7 @@ import { studioFetch } from "./client";
 import type { Block } from "../blocks";
 
 const SANDBOX_API = "/web/sandbox/sessions";
+const SKILL_SANDBOX_API = "/web/skills/sandbox/sessions";
 const CODEX_PROJECT_HANDOFF_API = "/web/sandbox/codex-project-handoff";
 const LIST_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 330_000;
@@ -233,6 +234,16 @@ export interface SandboxStartOptions extends SandboxRequestOptions {
   persistent?: boolean;
 }
 
+export interface SkillSandboxStartOptions extends SandboxRequestOptions {
+  displayName?: string;
+  skillSpaceId: string;
+  skillId: string;
+  version?: string;
+  region?: string;
+  skillName?: string;
+  skillSpaceName?: string;
+}
+
 export interface SandboxSession {
   resourceType: "session";
   id: string;
@@ -297,6 +308,11 @@ export interface SandboxReply {
 export interface AgentKitSandboxClient {
   listSessions(options?: SandboxListOptions): Promise<SandboxAgentResource[]>;
   startSession(options?: SandboxStartOptions): Promise<SandboxSession>;
+  startSkillSession(options: SkillSandboxStartOptions): Promise<SandboxSession>;
+  sendSkillMessage(
+    message: SandboxMessage,
+    options?: SandboxRequestOptions,
+  ): Promise<SandboxReply>;
   listAgentSessions(
     kind: SandboxAgentKind,
     options?: SandboxListOptions,
@@ -1174,6 +1190,54 @@ function createSandboxClient(
       throw await responseError(response, "无法启动 AgentKit 沙箱，请稍后重试。");
     }
     return parseSession((await response.json()) as SessionResponse);
+  },
+
+  async startSkillSession(options) {
+    const response = await studioFetch(
+      SKILL_SANDBOX_API,
+      {
+        method: "POST",
+        headers: sandboxHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          displayName: options.displayName?.trim() ?? "",
+          skillSpaceId: options.skillSpaceId,
+          skillId: options.skillId,
+          version: options.version,
+          region: options.region,
+          skillName: options.skillName,
+          skillSpaceName: options.skillSpaceName,
+        }),
+        signal: options.signal,
+      },
+      START_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      throw await responseError(response, "无法启动 Skill 沙箱，请稍后重试。");
+    }
+    return parseSession((await response.json()) as SessionResponse);
+  },
+
+  async sendSkillMessage(message, options = {}) {
+    if (!message.sessionId || !message.text.trim()) {
+      throw new Error("Skill 沙箱会话缺少有效的消息内容。");
+    }
+    const response = await studioFetch(
+      `${SKILL_SANDBOX_API}/${encodeURIComponent(message.sessionId)}/messages`,
+      {
+        method: "POST",
+        headers: sandboxHeaders({
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ message: message.text }),
+        signal: options.signal,
+      },
+      config.messageTimeoutMs ?? MESSAGE_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      throw await responseError(response, "Skill 沙箱对话失败，请稍后重试。");
+    }
+    return parseSandboxStream(response, options);
   },
 
   async listAgentSessions(kind, options = {}) {
