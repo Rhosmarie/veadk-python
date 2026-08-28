@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import platform
 import tempfile
 from pathlib import Path
@@ -48,7 +49,10 @@ def initialize_session_path(session_id: str) -> Path:
         return _session_path_cache[session_id]
 
     # Initialize new session path
-    if platform.system() in ("Linux", "Darwin"):  # Linux or macOS
+    configured_base_path = os.getenv("VEADK_SKILLS_WORK_DIR")
+    if configured_base_path:
+        base_path = Path(configured_base_path).expanduser()
+    elif platform.system() in ("Linux", "Darwin"):  # Linux or macOS
         base_path = Path("/tmp") / "veadk"
     else:  # Windows
         base_path = Path(tempfile.gettempdir()) / "veadk"
