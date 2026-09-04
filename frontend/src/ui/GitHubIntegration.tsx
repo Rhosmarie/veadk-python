@@ -117,6 +117,19 @@ function pullRequestRepository(value: string): string {
   return match?.[1] ?? "";
 }
 
+function repositoryUrl(value: string): string {
+  try {
+    return `https://github.com/${normalizeGitHubRepository(value)}`;
+  } catch {
+    return "";
+  }
+}
+
+function requiredMark(value: string, required: boolean) {
+  if (!required || value.trim()) return null;
+  return <span className="github-required-mark" aria-hidden="true">*</span>;
+}
+
 export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: GitHubIntegrationProps) {
   const definition = getGitHubAutomation(automation);
   const [form, setForm] = useState<AutomationFormValues>(() => ({
@@ -134,6 +147,11 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const submitAbortRef = useRef<AbortController | null>(null);
   const reviewAbortRef = useRef<AbortController | null>(null);
+  const configuredRepositoryUrl = repositoryUrl(form.repository);
+  const configuredRepository = configuredRepositoryUrl.replace("https://github.com/", "");
+  const repositorySecretsUrl = configuredRepositoryUrl
+    ? `${configuredRepositoryUrl}/settings/secrets/actions`
+    : "";
 
   useEffect(() => () => {
     submitAbortRef.current?.abort();
@@ -253,14 +271,21 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
     fieldDefinition: AutomationFieldDefinition,
   ) => {
     const { name, label, placeholder, help, required } = fieldDefinition;
+    const isRepository = name === "repository";
     return (
       <div className="github-field" key={name}>
-        <label htmlFor={`github-${name}`}>
-          <span>{label}</span>
-          <span className={`github-field-requirement${required ? " is-required" : ""}`}>
-            {required ? "必填" : "可选"}
-          </span>
-        </label>
+        <div className="github-field-label-row">
+          <label htmlFor={`github-${name}`}>
+            <span>{label}</span>
+            {requiredMark(form[name], required)}
+          </label>
+          {isRepository ? (
+            <a className="github-field-action" href="https://github.com/" target="_blank" rel="noreferrer">
+              https://github.com/
+              <ExternalIcon />
+            </a>
+          ) : null}
+        </div>
         <input
           id={`github-${name}`}
           value={form[name]}
@@ -271,7 +296,11 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
           aria-invalid={Boolean(fieldErrors[name])}
           aria-describedby={`github-${name}-help${fieldErrors[name] ? ` github-${name}-error` : ""}`}
         />
-        <span id={`github-${name}-help`} className="github-field-help">{help}</span>
+        <span id={`github-${name}-help`} className="github-field-help">
+          {isRepository && configuredRepository
+            ? `将为 ${configuredRepository} 添加 PR 自动评审配置`
+            : help}
+        </span>
         {fieldErrors[name] ? <span id={`github-${name}-error`} className="github-field-error" role="alert">{fieldErrors[name]}</span> : null}
       </div>
     );
@@ -301,7 +330,7 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
               <div className="github-field">
                 <label id="github-region-label">
                   <span>地域</span>
-                  <span className="github-field-requirement is-required">必填</span>
+                  {requiredMark(form.region, true)}
                 </label>
                 <div
                   className="pp-network-region github-region-picker"
@@ -360,14 +389,15 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
               <div className="github-token-label-row">
                 <label htmlFor="github-token">
                   <span>GitHub Token</span>
-                  <span className="github-field-requirement is-required">必填</span>
+                  {requiredMark(form.token, true)}
                 </label>
                 <a
+                  className="github-field-action"
                   href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Create%20a%20GitHub%20automation%20pull%20request&contents=write&pull_requests=write&workflows=write"
                   target="_blank"
                   rel="noreferrer"
                 >
-                  获取 Token
+                  创建 GitHub Token
                   <ExternalIcon />
                 </a>
               </div>
@@ -399,16 +429,41 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
 
             {submitError ? <div className="github-submit-message is-error" role="alert">{submitError}</div> : null}
             {result ? (
-              <div className="github-submit-message is-success" role="status">
-                <span>PR #{result.number} 已创建</span>
-                <a href={result.url} target="_blank" rel="noreferrer">在 GitHub 查看<ExternalIcon /></a>
+              <div className="github-submit-message is-success github-result-message" role="status">
+                <div>
+                  <strong>配置 PR #{result.number} 已创建</strong>
+                  <span>合并后，后续同仓库 PR 会自动触发评审。</span>
+                </div>
+                <a className="github-result-link" href={result.url} target="_blank" rel="noreferrer">
+                  查看配置 PR
+                  <ExternalIcon />
+                </a>
               </div>
             ) : null}
 
             <div className="github-form-actions">
               <div className="github-secrets-note">
-                <strong>合并 PR 前，请在目标仓库 Settings → Secrets and variables → Actions → Repository secrets 中添加：</strong>
-                {definition.secrets.map((secret) => <span key={secret}>{secret}</span>)}
+                <div className="github-secrets-header">
+                  <strong>合并配置 PR 前，请在目标仓库添加运行时密钥</strong>
+                  {repositorySecretsUrl ? (
+                    <a className="github-secrets-link" href={repositorySecretsUrl} target="_blank" rel="noreferrer">
+                      打开 Secrets 设置
+                      <ExternalIcon />
+                    </a>
+                  ) : null}
+                </div>
+                <span className="github-secrets-path">路径：Settings → Secrets and variables → Actions → Repository secrets</span>
+                <ul>
+                  {definition.secrets.map((secret) => {
+                    const [name, ...descriptionParts] = secret.split("：");
+                    return (
+                      <li key={secret}>
+                        <code>{name}</code>
+                        {descriptionParts.length ? <span>{descriptionParts.join("：")}</span> : null}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
               <button type="submit" disabled={submitting}>
                 {submitting ? "提交 PR 中…" : definition.submitLabel}
@@ -424,7 +479,7 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
               <div className="github-field">
                 <label htmlFor="github-pull-request-url">
                   <span>Pull Request URL</span>
-                  <span className="github-field-requirement is-required">必填</span>
+                  {requiredMark(pullRequestUrl, true)}
                 </label>
                 <input
                   id="github-pull-request-url"
