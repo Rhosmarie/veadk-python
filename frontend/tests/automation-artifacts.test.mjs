@@ -102,8 +102,8 @@ test("generates the isolated pull request review workflow in frontend", async ()
   assert.match(workflow, /"thread\/start"/);
   assert.match(workflow, /"turn\/start"/);
   assert.match(workflow, /"turn\/completed"/);
-  assert.match(workflow, /"experimentalApi": False/);
-  assert.doesNotMatch(workflow, /"experimentalApi": True/);
+  assert.match(workflow, /"experimentalApi": True/);
+  assert.doesNotMatch(workflow, /"experimentalApi": False/);
   assert.match(workflow, /def _runtime_permission_params/);
   assert.match(workflow, /"approvalPolicy": "on-request"/);
   assert.match(workflow, /"approvalsReviewer": "user"/);
@@ -113,7 +113,10 @@ test("generates the isolated pull request review workflow in frontend", async ()
   assert.match(workflow, /"excludeTmpdirEnvVar": False/);
   assert.match(workflow, /item\/permissions\/requestApproval/);
   assert.match(workflow, /"result": \{"decision": "accept"\}/);
-  assert.doesNotMatch(workflow, /unsupported server request|invalid params for/);
+  assert.match(workflow, /unsupported server request/);
+  assert.match(workflow, /invalid params for/);
+  assert.match(workflow, /"name": "agentkit_codex_app_server_client"/);
+  assert.match(workflow, /"title": "AgentKit Studio"/);
   assert.doesNotMatch(workflow, /modelProvider\/capabilities\/read|namespaceTools|imageGeneration|webSearch/);
   assert.match(workflow, /"thread\/start",\n\s+_runtime_permission_params\(\),/);
   assert.match(workflow, /\*\*_runtime_permission_params\(cwd\)/);

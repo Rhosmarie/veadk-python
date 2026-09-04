@@ -35,7 +35,8 @@ export function buildPullRequestReviewPrompt(pullRequestUrl: string): string {
 1.你需要遵守GitHub Skill，通过GitHubCLI获取PR信息、diff和必要的上下文
 2.遵守Code-Review Skill的规范，对PR进行CodeReview
 3.不要修改仓库文件，不要执行破坏性命令。
-4.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈`;
+4.评审完成后，必须使用 GitHub CLI 将评审结论评论到这个 Pull Request。
+5.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈`;
 }
 
 export function buildPullRequestReviewWorkflow(input: PullRequestReviewWorkflowInput): string {
@@ -89,7 +90,7 @@ jobs:
           import asyncio
           import json
           import os
-          from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+          from urllib.parse import urlsplit, urlunsplit
 
           from agentkit.sdk.tools import types as tools_types
           from agentkit.sdk.tools.client import AgentkitToolsClient
@@ -130,20 +131,33 @@ jobs:
           github_token = _required_secret("GH_TOKEN")
           prompt = os.environ["PR_REVIEW_PROMPT"].strip()
 
-          def _sandbox_service_url(endpoint, pathname, websocket=False):
+          def _redacted_url(url):
+              parsed = urlsplit(url)
+              query = "<redacted>" if parsed.query else ""
+              return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
+
+          def _sandbox_app_server_urls(endpoint):
               parsed = urlsplit(endpoint)
               if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.netloc:
                   raise RuntimeError("CreateSession returned an invalid Endpoint.")
-              scheme = (
-                  ("wss" if parsed.scheme in {"https", "wss"} else "ws")
-                  if websocket
-                  else ("https" if parsed.scheme in {"https", "wss"} else "http")
-              )
-              base_path = parsed.path.rstrip("/")
-              if base_path.endswith("/v1/codex/app-server"):
-                  base_path = base_path.removesuffix("/v1/codex/app-server")
-              values = list(parse_qsl(parsed.query, keep_blank_values=True))
-              return urlunsplit((scheme, parsed.netloc, f"{base_path}{pathname}", urlencode(values), ""))
+              scheme = "wss" if parsed.scheme in {"https", "wss"} else "ws"
+              normalized_path = parsed.path.rstrip("/")
+              candidates = []
+              if normalized_path.endswith("/v1/codex/app-server"):
+                  candidates.append(urlunsplit((scheme, parsed.netloc, f"{normalized_path}/", parsed.query, "")))
+              candidates.append(urlunsplit((scheme, parsed.netloc, "/v1/codex/app-server/", parsed.query, "")))
+              prefixed_base = normalized_path
+              if prefixed_base.endswith("/v1/codex/app-server"):
+                  prefixed_base = prefixed_base.removesuffix("/v1/codex/app-server")
+              if prefixed_base:
+                  candidates.append(urlunsplit((scheme, parsed.netloc, f"{prefixed_base}/v1/codex/app-server/", parsed.query, "")))
+              deduped = []
+              seen = set()
+              for candidate in candidates:
+                  if candidate not in seen:
+                      seen.add(candidate)
+                      deduped.append(candidate)
+              return deduped
 
           def _runtime_permission_params(cwd=""):
               return {
@@ -180,6 +194,16 @@ jobs:
           async def _handle_server_request(websocket, message):
               request_id = message.get("id")
               method = message.get("method")
+              params = message.get("params")
+              if not isinstance(params, dict):
+                  await websocket.send(json.dumps({
+                      "id": request_id,
+                      "error": {
+                          "code": -32602,
+                          "message": f"invalid params for {method}",
+                      },
+                  }))
+                  return
               if method == "item/permissions/requestApproval":
                   await websocket.send(json.dumps({
                       "id": request_id,
@@ -197,10 +221,16 @@ jobs:
                   return
               await websocket.send(json.dumps({
                   "id": request_id,
-                  "result": {},
+                  "error": {
+                      "code": -32601,
+                      "message": f"unsupported server request: {method}",
+                  },
               }))
 
           async def _wait_turn_completed(websocket, timeout=1800):
+              streamed_text = False
+              fallback_text = ""
+
               def _error_detail(value):
                   if isinstance(value, dict):
                       for key in ("message", "detail", "error"):
@@ -226,6 +256,15 @@ jobs:
                       delta = params.get("delta")
                       if isinstance(delta, str) and delta:
                           print(delta, end="", flush=True)
+                          streamed_text = True
+                      continue
+                  if method == "item/completed" and isinstance(params, dict):
+                      item = params.get("item")
+                      if isinstance(item, dict) and item.get("type") == "agentMessage":
+                          text = item.get("text")
+                          phase = item.get("phase")
+                          if isinstance(text, str) and text.strip() and phase in {None, "final_answer"}:
+                              fallback_text = text
                       continue
                   if method == "error" and isinstance(params, dict):
                       raise RuntimeError(_error_detail(params))
@@ -237,28 +276,40 @@ jobs:
                   status = str(turn.get("status") or "completed").lower()
                   if status in {"failed", "cancelled", "canceled"}:
                       raise RuntimeError(f"Codex review turn failed: {_error_detail(turn.get('error') or turn)}")
+                  if fallback_text and not streamed_text:
+                      print(fallback_text, end="" if fallback_text.endswith("\n") else "\n", flush=True)
                   return turn
 
           async def _start_codex_review(endpoint, prompt):
-              app_server_url = _sandbox_service_url(endpoint, "/v1/codex/app-server/", websocket=True)
-              async with websockets.connect(
-                  app_server_url,
-                  open_timeout=30,
-                  close_timeout=5,
-                  ping_timeout=60,
-                  max_size=20 * 1024 * 1024,
-              ) as websocket:
+              websocket = None
+              errors = []
+              for app_server_url in _sandbox_app_server_urls(endpoint):
+                  print(f"Connecting Codex app-server at {_redacted_url(app_server_url)}")
+                  try:
+                      websocket = await websockets.connect(
+                          app_server_url,
+                          open_timeout=30,
+                          close_timeout=5,
+                          ping_timeout=60,
+                          max_size=20 * 1024 * 1024,
+                      )
+                      break
+                  except Exception as error:
+                      errors.append(f"{_redacted_url(app_server_url)} -> {type(error).__name__}: {error}")
+              if websocket is None:
+                  raise RuntimeError("Unable to connect Codex app-server websocket:\n" + "\n".join(errors))
+              try:
                   await _send_jsonrpc(
                       websocket,
                       1,
                       "initialize",
                       {
                           "clientInfo": {
-                              "name": "github_actions_pr_review",
-                              "title": "GitHub Actions PR Review",
+                              "name": "agentkit_codex_app_server_client",
+                              "title": "AgentKit Studio",
                               "version": "1",
                           },
-                          "capabilities": {"experimentalApi": False},
+                          "capabilities": {"experimentalApi": True},
                       },
                   )
                   await websocket.send(json.dumps({"method": "initialized"}))
@@ -288,6 +339,8 @@ jobs:
                   print(f"Submitted PR review message to Codex thread {thread_id}, turn {turn_id}")
                   await _wait_turn_completed(websocket)
                   print("Codex PR review completed.")
+              finally:
+                  await websocket.close()
 
           def _session_value(session, *names):
               for name in names:
