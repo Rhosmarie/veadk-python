@@ -1,3 +1,5 @@
+import { studioFetch } from "./client";
+
 export type GitHubAutomationRegion = "cn-beijing" | "cn-shanghai";
 
 export interface GitHubPullRequestResult {
@@ -284,12 +286,15 @@ export async function startGitHubPullRequestReview(
   },
   signal: AbortSignal,
 ): Promise<GitHubPullRequestReviewResult> {
-  const response = await fetch("/web/github/pull-request-reviews", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-    signal,
-  });
+  const response = await studioFetch(
+    "/web/github/pull-request-reviews",
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
   if (!response.ok) {
     throw await responseErrorFromGitHubReview(response);
   }

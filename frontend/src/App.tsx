@@ -3642,6 +3642,59 @@ export default function App() {
     setSandboxProjectUploadOpen(false);
   }
 
+  async function openCodexSandboxSession(sessionId: string, source: AgentConnectSource = "my_agents") {
+    setError("");
+    const operation = beginAgentConnect({
+      targetId: String(sessionId),
+      agentKind: "codex",
+      connectSource: source,
+    });
+    try {
+      const connected = await sandboxClient.connectSession(sessionId);
+      const snapshot = await loadSandboxThreadHistory(connected);
+      operation.succeed({
+        sandboxStatus: telemetrySandboxStatus(connected.status),
+      });
+      viewSidRef.current = "";
+      setSessionId("");
+      setPendingTurns([]);
+      setInput("");
+      setInvocation(emptyInvocation());
+      releaseAllSandboxPreviews();
+      if (snapshot) {
+        setSandboxTurns(sandboxSnapshotTurnsForStatus(snapshot, connected.busy));
+        setSandboxSession({
+          ...connected,
+          threadId: snapshot.threadId,
+          cwd: snapshot.cwd ?? connected.cwd,
+          workspaceLocked: snapshot.workspaceLocked,
+          permissions: snapshot.permissions,
+          ...(snapshot.model ? { model: snapshot.model } : {}),
+        });
+      } else {
+        setSandboxTurns([]);
+        setSandboxSession(connected);
+      }
+      setSandboxBusy(connected.busy);
+      setCreateView(null);
+      setSkillCenter(false);
+      setAddAgent(false);
+      setAddMenu(false);
+      setSearchView(false);
+      setManageAgents(false);
+      setAgentDetailTarget(null);
+      setMyAgents(false);
+      setApplicationsView(null);
+      setCronJobsView(false);
+      setSandboxAgentDetailTarget(null);
+      setSandboxAgentWorkspace(null);
+    } catch (cause) {
+      operation.fail(classifyTelemetryError(cause));
+      setError(cause instanceof Error ? cause.message : String(cause));
+      throw cause;
+    }
+  }
+
   function openSandboxAgentDetails(session: SandboxAgentResource) {
     setMyAgentsActiveType(session.toolName);
     pushStudioPage({ page: "sandbox-agent-detail", returnTo: "agents" });
@@ -6407,8 +6460,7 @@ export default function App() {
                 automation={applicationsView}
                 onBack={() => setApplicationsView("catalog")}
                 onOpenSandboxSession={(id) => {
-                  setApplicationsView(null);
-                  void pickSession(id);
+                  void openCodexSandboxSession(id);
                 }}
               />
             ) : applicationsView === "catalog" ? (

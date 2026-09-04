@@ -181,6 +181,9 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   assert.match(githubSource, /立即评审一个 PR/);
   assert.match(githubSource, /startGitHubPullRequestReview/);
   assert.match(githubSource, /onOpenSandboxSession\?\.\(nextResult\.sessionId\)/);
+  assert.match(appSource, /async function openCodexSandboxSession\(sessionId: string/);
+  assert.match(appSource, /void openCodexSandboxSession\(id\)/);
+  assert.doesNotMatch(appSource, /onOpenSandboxSession=\{\(id\) => \{[\s\S]*?void pickSession\(id\)/);
   assert.match(githubSource, /className="pp-region-trigger"/);
   assert.match(githubSource, /role="listbox" aria-label="地域"/);
   assert.doesNotMatch(githubSource, /<select/);
@@ -219,6 +222,11 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   assert.match(apiSource, /export async function createGitHubPullRequest/);
   assert.match(apiSource, /export async function startGitHubPullRequestReview/);
   assert.match(apiSource, /\/web\/github\/pull-request-reviews/);
+  assert.match(apiSource, /import \{ studioFetch \} from "\.\/client"/);
+  assert.match(
+    apiSource,
+    /const response = await studioFetch\(\s*"\/web\/github\/pull-request-reviews"/,
+  );
   assert.match(deliverySource, /createGitHubPullRequest/);
   assert.match(templateSource, /createGitHubPullRequest/);
   assert.match(reviewSource, /createGitHubPullRequest/);
