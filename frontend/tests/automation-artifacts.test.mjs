@@ -94,15 +94,10 @@ test("generates the isolated pull request review workflow in frontend", async ()
   assert.match(workflow, /tool_id = os\.environ\["AGENTKIT_SANDBOX_TOOL_ID"\]\.strip\(\)/);
   assert.doesNotMatch(workflow, /list_tools|Ready CodeEnv Sandbox Tool|FiltersItemForListTools/);
   assert.match(workflow, /env_item\(Key="GH_TOKEN", Value=github_token\)/);
-  assert.match(workflow, /env_item\(Key="CODEX_CONFIG_TOML", Value=codex_config\)/);
-  assert.match(workflow, /env_item\(Key="CODEX_MODEL_CATALOG_JSON", Value=codex_model_catalog\)/);
+  assert.doesNotMatch(workflow, /CODEX_CONFIG_TOML|CODEX_MODEL_CATALOG_JSON/);
   assert.match(workflow, /authoritative = _get_authoritative_session\(client, tool_id, instance_id\)/);
   assert.match(workflow, /endpoint = _session_value\(authoritative, "endpoint", "Endpoint"\) or created_endpoint/);
-  assert.match(workflow, /model_catalog_json = \\"\/home\/gem\/\.codex\/model-catalog\.json\\"/);
-  assert.match(workflow, /env_key = \\"CODEX_API_KEY\\"/);
-  assert.match(workflow, /CODEX_MODEL_CATALOG_JSON/);
-  assert.match(workflow, /experimental_supported_tools/);
-  assert.match(workflow, /\\"experimental_supported_tools\\":\[\]/);
+  assert.doesNotMatch(workflow, /model_catalog_json|env_key = \\"CODEX_API_KEY\\"|experimental_supported_tools/);
   assert.match(workflow, /websockets\.connect/);
   assert.match(workflow, /"thread\/start"/);
   assert.match(workflow, /"turn\/start"/);

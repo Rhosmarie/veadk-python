@@ -17,66 +17,6 @@ interface PullRequestReviewWorkflowInput {
 
 const SANDBOX_TOOL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-const CODEX_MODEL = "deepseek-v4-flash-260425";
-const CODEX_MODEL_CATALOG_PATH = "/home/gem/.codex/model-catalog.json";
-
-const CODEX_MODEL_CATALOG_JSON = JSON.stringify({
-  models: [
-    CODEX_MODEL,
-    "deepseek-v4-flash-ga-260731",
-    "deepseek-v4-pro-260425",
-    "doubao-seed-2-1-pro-260628",
-    "doubao-seed-2-1-turbo-260628",
-    "doubao-seed-2.1-turbo",
-    "doubao-seed-2.0-lite",
-    "doubao-seed-evolving",
-    "glm-5.2",
-    "glm-5-2-260617",
-  ].map((model, index) => ({
-    slug: model,
-    display_name: model,
-    supported_reasoning_levels: [
-      { effort: "low", description: "Fast responses with lighter reasoning" },
-      { effort: "medium", description: "Balances speed and reasoning depth" },
-      { effort: "high", description: "Greater reasoning depth" },
-    ],
-    max_context_window: model.startsWith("deepseek-v4") || model.startsWith("glm-5")
-      ? 1_000_000
-      : 200_000,
-    shell_type: "shell_command",
-    visibility: "list",
-    supported_in_api: true,
-    priority: 100 - index,
-    base_instructions: "",
-    supports_reasoning_summaries: true,
-    support_verbosity: false,
-    truncation_policy: { mode: "tokens", limit: 10_000 },
-    supports_parallel_tool_calls: false,
-    experimental_supported_tools: [],
-  })),
-});
-
-const CODEX_CONFIG_TOML = `model_provider = "codex"
-model = "${CODEX_MODEL}"
-review_model = "${CODEX_MODEL}"
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
-model_reasoning_effort = "medium"
-personality = "pragmatic"
-model_catalog_json = "${CODEX_MODEL_CATALOG_PATH}"
-check_for_update_on_startup = false
-web_search = "disabled"
-
-[projects."/home/gem"]
-trust_level = "trusted"
-
-[model_providers.codex]
-name = "codex"
-base_url = "https://ark.cn-beijing.volces.com/api/v3"
-wire_api = "responses"
-env_key = "CODEX_API_KEY"
-`;
-
 export function validatePullRequestReviewSettings(
   input: PullRequestReviewWorkflowInput,
 ): void {
@@ -189,8 +129,6 @@ jobs:
           user_session_id = os.environ["SESSION_ID"].strip()
           github_token = _required_secret("GH_TOKEN")
           prompt = os.environ["PR_REVIEW_PROMPT"].strip()
-          codex_config = __CODEX_CONFIG_TOML__
-          codex_model_catalog = __CODEX_MODEL_CATALOG_JSON__
 
           def _sandbox_service_url(endpoint, pathname, websocket=False):
               parsed = urlsplit(endpoint)
@@ -387,8 +325,6 @@ jobs:
               TtlUnit="second",
               Envs=[
                   env_item(Key="GH_TOKEN", Value=github_token),
-                  env_item(Key="CODEX_CONFIG_TOML", Value=codex_config),
-                  env_item(Key="CODEX_MODEL_CATALOG_JSON", Value=codex_model_catalog),
               ],
           )
           session = client.create_session(request)
@@ -412,8 +348,6 @@ jobs:
     __SANDBOX_TOOL_ID__: JSON.stringify(input.sandboxToolId),
     __GH_TOKEN_VALUE__: "${GH_TOKEN:-}",
     __PROMPT_JSON__: JSON.stringify(buildPullRequestReviewPrompt("${{ github.event.pull_request.html_url }}")),
-    __CODEX_CONFIG_TOML__: JSON.stringify(CODEX_CONFIG_TOML),
-    __CODEX_MODEL_CATALOG_JSON__: JSON.stringify(CODEX_MODEL_CATALOG_JSON),
   };
   return Object.entries(replacements).reduce(
     (workflow, [key, value]) => workflow.split(key).join(value),
