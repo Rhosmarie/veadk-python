@@ -34,9 +34,10 @@ export function buildPullRequestReviewPrompt(pullRequestUrl: string): string {
 要求：
 1.你需要遵守GitHub Skill，通过GitHubCLI获取PR信息、diff和必要的上下文
 2.遵守Code-Review Skill的规范，对PR进行CodeReview
-3.不要修改仓库文件，不要执行破坏性命令。
-4.评审完成后，必须使用 GitHub CLI 将评审结论评论到这个 Pull Request。
-5.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈`;
+3.GitHub CLI 已通过 GH_TOKEN/GITHUB_TOKEN 环境变量授权；禁止执行 gh auth login、禁止请求设备码或浏览器授权。如果 gh 提示需要登录，请直接报告 GH_TOKEN 不可用或权限不足。
+4.不要修改仓库文件，不要执行破坏性命令。
+5.评审完成后，必须使用 GitHub CLI 将评审结论评论到这个 Pull Request。
+6.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈`;
 }
 
 export function buildPullRequestReviewWorkflow(input: PullRequestReviewWorkflowInput): string {
@@ -68,6 +69,9 @@ jobs:
       VOLCENGINE_REGION: __REGION__
       AGENTKIT_SANDBOX_TOOL_ID: __SANDBOX_TOOL_ID__
       GH_TOKEN: __GH__ secrets.GH_TOKEN }}
+      GITHUB_TOKEN: __GH__ secrets.GH_TOKEN }}
+      GH_PROMPT_DISABLED: "1"
+      GIT_TERMINAL_PROMPT: "0"
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -129,6 +133,7 @@ jobs:
           region = os.environ["VOLCENGINE_REGION"].strip()
           user_session_id = os.environ["SESSION_ID"].strip()
           github_token = _required_secret("GH_TOKEN")
+          github_api_token = _required_secret("GITHUB_TOKEN")
           prompt = os.environ["PR_REVIEW_PROMPT"].strip()
 
           def _redacted_url(url):
@@ -283,19 +288,24 @@ jobs:
           async def _start_codex_review(endpoint, prompt):
               websocket = None
               errors = []
-              for app_server_url in _sandbox_app_server_urls(endpoint):
-                  print(f"Connecting Codex app-server at {_redacted_url(app_server_url)}")
-                  try:
-                      websocket = await websockets.connect(
-                          app_server_url,
-                          open_timeout=30,
-                          close_timeout=5,
-                          ping_timeout=60,
-                          max_size=20 * 1024 * 1024,
-                      )
+              app_server_urls = _sandbox_app_server_urls(endpoint)
+              for attempt in range(1, 7):
+                  for app_server_url in app_server_urls:
+                      print(f"Connecting Codex app-server at {_redacted_url(app_server_url)} (attempt {attempt}/6)")
+                      try:
+                          websocket = await websockets.connect(
+                              app_server_url,
+                              open_timeout=30,
+                              close_timeout=5,
+                              ping_timeout=60,
+                              max_size=20 * 1024 * 1024,
+                          )
+                          break
+                      except Exception as error:
+                          errors.append(f"{_redacted_url(app_server_url)} -> {type(error).__name__}: {error}")
+                  if websocket is not None:
                       break
-                  except Exception as error:
-                      errors.append(f"{_redacted_url(app_server_url)} -> {type(error).__name__}: {error}")
+                  await asyncio.sleep(5)
               if websocket is None:
                   raise RuntimeError("Unable to connect Codex app-server websocket:\n" + "\n".join(errors))
               try:
@@ -378,6 +388,9 @@ jobs:
               TtlUnit="second",
               Envs=[
                   env_item(Key="GH_TOKEN", Value=github_token),
+                  env_item(Key="GITHUB_TOKEN", Value=github_api_token),
+                  env_item(Key="GH_PROMPT_DISABLED", Value="1"),
+                  env_item(Key="GIT_TERMINAL_PROMPT", Value="0"),
               ],
           )
           session = client.create_session(request)

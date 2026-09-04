@@ -94,6 +94,9 @@ test("generates the isolated pull request review workflow in frontend", async ()
   assert.match(workflow, /tool_id = os\.environ\["AGENTKIT_SANDBOX_TOOL_ID"\]\.strip\(\)/);
   assert.doesNotMatch(workflow, /list_tools|Ready CodeEnv Sandbox Tool|FiltersItemForListTools/);
   assert.match(workflow, /env_item\(Key="GH_TOKEN", Value=github_token\)/);
+  assert.match(workflow, /env_item\(Key="GITHUB_TOKEN", Value=github_api_token\)/);
+  assert.match(workflow, /env_item\(Key="GH_PROMPT_DISABLED", Value="1"\)/);
+  assert.match(workflow, /env_item\(Key="GIT_TERMINAL_PROMPT", Value="0"\)/);
   assert.doesNotMatch(workflow, /CODEX_CONFIG_TOML|CODEX_MODEL_CATALOG_JSON/);
   assert.match(workflow, /authoritative = _get_authoritative_session\(client, tool_id, instance_id\)/);
   assert.match(workflow, /endpoint = _session_value\(authoritative, "endpoint", "Endpoint"\) or created_endpoint/);
@@ -121,7 +124,11 @@ test("generates the isolated pull request review workflow in frontend", async ()
   assert.match(workflow, /"thread\/start",\n\s+_runtime_permission_params\(\),/);
   assert.match(workflow, /\*\*_runtime_permission_params\(cwd\)/);
   assert.match(workflow, /请评审这个 Pull Request：\$\{\{ github\.event\.pull_request\.html_url \}\}/);
+  assert.match(workflow, /禁止执行 gh auth login/);
   assert.match(workflow, /\$\{\{ secrets\.GH_TOKEN \}\}/);
+  assert.match(workflow, /GITHUB_TOKEN: \$\{\{ secrets\.GH_TOKEN \}\}/);
+  assert.match(workflow, /GH_PROMPT_DISABLED: "1"/);
+  assert.match(workflow, /GIT_TERMINAL_PROMPT: "0"/);
   const pythonScript = workflow.match(/python <<'PY'\n([\s\S]*?)\n\s+PY/)?.[1];
   assert.ok(pythonScript);
   const nonBlankPythonLines = pythonScript.split("\n").filter((line) => line.trim());
