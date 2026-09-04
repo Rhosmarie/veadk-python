@@ -189,9 +189,12 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   assert.match(reviewSource, /tool\.kind === "codex" && !tool\.snapshot/);
   assert.doesNotMatch(reviewSource, /模型 API 地址/);
   assert.doesNotMatch(reviewSource, /CODEX_MODEL_API_KEY/);
-  assert.match(reviewSource, /GH_TOKEN：GitHub fine-grained PAT/);
-  assert.match(reviewSource, /Workflows: Read and write/);
+  assert.match(reviewSource, /GH_TOKEN：目标仓库 fine-grained PAT/);
+  assert.match(reviewSource, /Contents、Pull requests、Workflows 读写权限/);
   assert.match(githubSource, /立即评审一个 PR/);
+  assert.match(githubSource, /className="github-field-note">必须属于上方 GitHub Repo/);
+  assert.doesNotMatch(githubSource, /新建一次性 Codex Sandbox Session/);
+  assert.doesNotMatch(githubSource, /发起成功后会自动打开新 Session/);
   assert.match(githubSource, /startGitHubPullRequestReview/);
   assert.match(githubSource, /onOpenSandboxSession\?\.\(nextResult\.sessionId\)/);
   assert.match(appSource, /async function openCodexSandboxSession\(sessionId: string/);

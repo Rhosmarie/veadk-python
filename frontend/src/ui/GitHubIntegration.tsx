@@ -474,13 +474,15 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
             <section className="github-review-now" aria-labelledby="github-review-now-title">
               <div className="github-review-now-copy">
                 <h2 id="github-review-now-title">立即评审一个 PR</h2>
-                <p>新建一次性 Codex Sandbox Session，并把当前 GitHub Token 作为本次 Session 的 GH_TOKEN 注入。</p>
               </div>
               <div className="github-field">
-                <label htmlFor="github-pull-request-url">
-                  <span>Pull Request URL</span>
-                  {requiredMark(pullRequestUrl, true)}
-                </label>
+                <div className="github-field-label-row">
+                  <label htmlFor="github-pull-request-url">
+                    <span>Pull Request URL</span>
+                    {requiredMark(pullRequestUrl, true)}
+                  </label>
+                  <span className="github-field-note">必须属于上方 GitHub Repo</span>
+                </div>
                 <input
                   id="github-pull-request-url"
                   value={pullRequestUrl}
@@ -496,9 +498,8 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
                   }))}
                   placeholder="https://github.com/owner/repository/pull/123"
                   aria-invalid={Boolean(fieldErrors.pullRequestUrl)}
-                  aria-describedby={`github-pull-request-url-help${fieldErrors.pullRequestUrl ? " github-pull-request-url-error" : ""}`}
+                  aria-describedby={fieldErrors.pullRequestUrl ? "github-pull-request-url-error" : undefined}
                 />
-                <span id="github-pull-request-url-help" className="github-field-help">必须属于上方 GitHub Repo；发起成功后会自动打开新 Session。</span>
                 {fieldErrors.pullRequestUrl ? <span id="github-pull-request-url-error" className="github-field-error" role="alert">{fieldErrors.pullRequestUrl}</span> : null}
               </div>
               {reviewError ? <div className="github-submit-message is-error" role="alert">{reviewError}</div> : null}

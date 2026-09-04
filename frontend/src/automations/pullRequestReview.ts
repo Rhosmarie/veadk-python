@@ -454,9 +454,9 @@ export const pullRequestReviewAutomation: GitHubAutomationDefinition = {
   initialValues: initialAutomationValues(),
   regionHelp: "用于 GitHub Actions 创建评审 Sandbox Session",
   secrets: [
-    "GH_TOKEN：GitHub fine-grained PAT，Repository access 选择目标仓库；Permissions 至少配置 Contents: Read and write、Pull requests: Read and write、Workflows: Read and write。Workflows 权限用于创建 .github/workflows/codex-pr-review.yml；运行评审时它只会在创建本次 Sandbox Session 时作为 GH_TOKEN 注入，供 Codex 通过 GitHub CLI 读取 PR、获取 diff、写回 review 评论。",
-    "VOLCENGINE_ACCESS_KEY：火山引擎访问密钥，用于 GitHub Actions 调用 AgentKit 创建隔离的评审 Sandbox Session。",
-    "VOLCENGINE_SECRET_KEY：与 VOLCENGINE_ACCESS_KEY 配套的火山引擎密钥。不要填入模型 API Key 或 Studio API Token。",
+    "GH_TOKEN：目标仓库 fine-grained PAT；需 Contents、Pull requests、Workflows 读写权限，用于读取 PR diff 并写回 review 评论。",
+    "VOLCENGINE_ACCESS_KEY：火山引擎访问密钥，用于创建评审 Sandbox Session。",
+    "VOLCENGINE_SECRET_KEY：与 ACCESS_KEY 配套的火山引擎密钥，不要填写模型 API Key。",
   ],
   async submit(values, signal) {
     const input = commonGitHubInput(values);
