@@ -6406,6 +6406,10 @@ export default function App() {
               <GitHubIntegration
                 automation={applicationsView}
                 onBack={() => setApplicationsView("catalog")}
+                onOpenSandboxSession={(id) => {
+                  setApplicationsView(null);
+                  void pickSession(id);
+                }}
               />
             ) : applicationsView === "catalog" ? (
               <Applications onOpen={setApplicationsView} />

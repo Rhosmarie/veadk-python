@@ -8,7 +8,10 @@ import {
 } from "react";
 
 import {
+  startGitHubPullRequestReview,
   type GitHubPullRequestResult,
+  type GitHubPullRequestReviewResult,
+  normalizeGitHubRepository,
 } from "../adk/githubIntegration";
 import { getGitHubAutomation } from "../automations/registry";
 import type {
@@ -24,9 +27,11 @@ import "./GitHubIntegration.css";
 interface GitHubIntegrationProps {
   automation: GitHubAutomationId;
   onBack: () => void;
+  onOpenSandboxSession?: (sessionId: string) => void;
 }
 
-type FieldName = AutomationFieldName | "region" | "token";
+type FormFieldName = AutomationFieldName | "region" | "token";
+type FieldName = FormFieldName | "pullRequestUrl";
 
 function BackIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -104,10 +109,18 @@ function validateField(name: FieldName, value: string, required: boolean): strin
       return "请输入有效的 HTTPS 地址";
     }
   }
+  if (name === "pullRequestUrl" && !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*\/?$/.test(text)) {
+    return "请输入完整的 GitHub Pull Request URL";
+  }
   return "";
 }
 
-export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps) {
+function pullRequestRepository(value: string): string {
+  const match = value.trim().match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/[1-9][0-9]*\/?$/);
+  return match?.[1] ?? "";
+}
+
+export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: GitHubIntegrationProps) {
   const definition = getGitHubAutomation(automation);
   const [form, setForm] = useState<AutomationFormValues>(() => ({
     ...definition.initialValues,
@@ -118,11 +131,19 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
   const [showToken, setShowToken] = useState(false);
   const [regionMenuOpen, setRegionMenuOpen] = useState(false);
   const [result, setResult] = useState<GitHubPullRequestResult | null>(null);
+  const [pullRequestUrl, setPullRequestUrl] = useState("");
+  const [reviewResult, setReviewResult] = useState<GitHubPullRequestReviewResult | null>(null);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const submitAbortRef = useRef<AbortController | null>(null);
+  const reviewAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => submitAbortRef.current?.abort(), []);
+  useEffect(() => () => {
+    submitAbortRef.current?.abort();
+    reviewAbortRef.current?.abort();
+  }, []);
 
-  const updateField = (name: FieldName, value: string) => {
+  const updateField = (name: FormFieldName, value: string) => {
     setForm((current) => ({ ...current, [name]: value }));
     if (fieldErrors[name]) {
       setFieldErrors((current) => ({ ...current, [name]: "" }));
@@ -131,8 +152,10 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
 
   const blurField = (name: FieldName) => {
     const required = name === "token"
+      || name === "pullRequestUrl"
       || definition.fields.find((field) => field.name === name)?.required === true;
-    const error = validateField(name, form[name], required);
+    const value = name === "pullRequestUrl" ? pullRequestUrl : form[name as FormFieldName];
+    const error = validateField(name, value, required);
     setFieldErrors((current) => ({ ...current, [name]: error }));
   };
 
@@ -175,6 +198,57 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
   const stopComposingSubmit = (event: KeyboardEvent<HTMLFormElement>) => {
     if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {
       event.preventDefault();
+    }
+  };
+
+  const startReview = async () => {
+    const errors: Partial<Record<FieldName, string>> = {};
+    const repositoryError = validateField("repository", form.repository, true);
+    const tokenError = validateField("token", form.token, true);
+    const pullRequestError = validateField("pullRequestUrl", pullRequestUrl, true);
+    if (repositoryError) errors.repository = repositoryError;
+    if (tokenError) errors.token = tokenError;
+    if (pullRequestError) errors.pullRequestUrl = pullRequestError;
+    if (!pullRequestError && !repositoryError) {
+      try {
+        const configuredRepository = normalizeGitHubRepository(form.repository);
+        const prRepository = pullRequestRepository(pullRequestUrl);
+        if (prRepository && prRepository !== configuredRepository) {
+          errors.pullRequestUrl = "PR URL 必须属于上方填写的 GitHub Repo";
+        }
+      } catch (error) {
+        errors.repository = error instanceof Error ? error.message : String(error);
+      }
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
+
+    reviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    reviewAbortRef.current = controller;
+    setReviewSubmitting(true);
+    setReviewError("");
+    setReviewResult(null);
+    try {
+      const nextResult = await startGitHubPullRequestReview(
+        {
+          pullRequestUrl: pullRequestUrl.trim(),
+          githubToken: form.token.trim(),
+        },
+        controller.signal,
+      );
+      if (reviewAbortRef.current !== controller) return;
+      setReviewResult(nextResult);
+      setForm((current) => ({ ...current, token: "" }));
+      onOpenSandboxSession?.(nextResult.sessionId);
+    } catch (error) {
+      if (controller.signal.aborted || reviewAbortRef.current !== controller) return;
+      setReviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (reviewAbortRef.current === controller) {
+        reviewAbortRef.current = null;
+        setReviewSubmitting(false);
+      }
     }
   };
 
@@ -292,7 +366,7 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
                   <span className="github-field-requirement is-required">必填</span>
                 </label>
                 <a
-                  href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Create%20a%20GitHub%20automation%20pull%20request&contents=write&pull_requests=write"
+                  href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Create%20a%20GitHub%20automation%20pull%20request&contents=write&pull_requests=write&workflows=write"
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -309,7 +383,7 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
                   onBlur={() => blurField("token")}
                   autoComplete="off"
                   required
-                  placeholder="需要仓库 Contents 与 Pull requests 写权限"
+                  placeholder="需要 Contents、Pull requests、Workflows 写权限"
                   aria-invalid={Boolean(fieldErrors.token)}
                   aria-describedby={`github-token-help${fieldErrors.token ? " github-token-error" : ""}`}
                 />
@@ -322,7 +396,7 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
                   <EyeIcon hidden={showToken} />
                 </button>
               </div>
-              <span id="github-token-help" className="github-field-help">Token 仅用于本次提交，不会保存在浏览器或写入 PR</span>
+              <span id="github-token-help" className="github-field-help">此处 Token 用于创建配置 PR；它不是 Sandbox 的通用必填项，且不会保存在浏览器或写入 PR</span>
               {fieldErrors.token ? <span id="github-token-error" className="github-field-error" role="alert">{fieldErrors.token}</span> : null}
             </div>
 
@@ -336,7 +410,7 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
 
             <div className="github-form-actions">
               <div className="github-secrets-note">
-                <strong>合并 PR 前，请在仓库的 GitHub Actions Secrets 中配置：</strong>
+                <strong>合并 PR 前，请在目标仓库 Settings → Secrets and variables → Actions → Repository secrets 中添加：</strong>
                 {definition.secrets.map((secret) => <span key={secret}>{secret}</span>)}
               </div>
               <button type="submit" disabled={submitting}>
@@ -344,6 +418,50 @@ export function GitHubIntegration({ automation, onBack }: GitHubIntegrationProps
               </button>
             </div>
           </form>
+          {automation === "review" ? (
+            <section className="github-review-now" aria-labelledby="github-review-now-title">
+              <div className="github-review-now-copy">
+                <h2 id="github-review-now-title">立即评审一个 PR</h2>
+                <p>新建一次性 Codex Sandbox Session，并把当前 GitHub Token 作为本次 Session 的 GH_TOKEN 注入。</p>
+              </div>
+              <div className="github-field">
+                <label htmlFor="github-pull-request-url">
+                  <span>Pull Request URL</span>
+                  <span className="github-field-requirement is-required">必填</span>
+                </label>
+                <input
+                  id="github-pull-request-url"
+                  value={pullRequestUrl}
+                  onChange={(event) => {
+                    setPullRequestUrl(event.target.value);
+                    if (fieldErrors.pullRequestUrl) {
+                      setFieldErrors((current) => ({ ...current, pullRequestUrl: "" }));
+                    }
+                  }}
+                  onBlur={() => setFieldErrors((current) => ({
+                    ...current,
+                    pullRequestUrl: validateField("pullRequestUrl", pullRequestUrl, true),
+                  }))}
+                  placeholder="https://github.com/owner/repository/pull/123"
+                  aria-invalid={Boolean(fieldErrors.pullRequestUrl)}
+                  aria-describedby={`github-pull-request-url-help${fieldErrors.pullRequestUrl ? " github-pull-request-url-error" : ""}`}
+                />
+                <span id="github-pull-request-url-help" className="github-field-help">必须属于上方 GitHub Repo；发起成功后会自动打开新 Session。</span>
+                {fieldErrors.pullRequestUrl ? <span id="github-pull-request-url-error" className="github-field-error" role="alert">{fieldErrors.pullRequestUrl}</span> : null}
+              </div>
+              {reviewError ? <div className="github-submit-message is-error" role="alert">{reviewError}</div> : null}
+              {reviewResult ? (
+                <div className="github-submit-message is-success" role="status">
+                  <span>已发起评审，Session {reviewResult.sessionId} 正在运行。</span>
+                </div>
+              ) : null}
+              <div className="github-review-now-actions">
+                <button type="button" onClick={startReview} disabled={reviewSubmitting}>
+                  {reviewSubmitting ? "发起评审中…" : "立即发起评审"}
+                </button>
+              </div>
+            </section>
+          ) : null}
         </section>
       </div>
     </div>

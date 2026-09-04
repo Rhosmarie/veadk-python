@@ -104,6 +104,28 @@ function SpinnerIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function GithubTokenEyeIcon({
+  hidden,
+  ...props
+}: SVGProps<SVGSVGElement> & { hidden: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M2.5 10s2.6-4 7.5-4 7.5 4 7.5 4-2.6 4-7.5 4-7.5-4-7.5-4Z" />
+      <circle cx="10" cy="10" r="1.8" />
+      {hidden ? <path d="m4 4 12 12" /> : null}
+    </svg>
+  );
+}
+
 export function GithubCicdPanel({
   project,
   region,
@@ -127,6 +149,7 @@ export function GithubCicdPanel({
   const [result, setResult] = useState<GithubCicdPipelineResult | null>(null);
   const [error, setError] = useState<GithubCicdPipelineErrorDetail | null>(null);
   const [pendingCicdSelected, setPendingCicdSelected] = useState(false);
+  const [showGithubToken, setShowGithubToken] = useState(false);
 
   useEffect(() => {
     if (binding?.pipelineId || binding?.runtimeId || binding?.status) {
@@ -380,18 +403,43 @@ export function GithubCicdPanel({
             />
           </label>
           <label className="pp-github-cicd-field">
-            <span>Token</span>
-            <input
-              type="password"
-              value={githubToken}
-              placeholder="repo 或 contents write 权限"
-              disabled={disabled || submitting}
-              autoComplete="off"
-              onChange={(event) => {
-                setPendingCicdSelected(false);
-                setGithubToken(event.currentTarget.value);
-              }}
-            />
+            <span className="pp-github-token-label-row">
+              <span>Token</span>
+              <a
+                href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Sync%20AgentKit%20Studio%20source&contents=write"
+                target="_blank"
+                rel="noreferrer"
+              >
+                获取 Token
+                <ExternalLinkIcon className="pp-ic" />
+              </a>
+            </span>
+            <span className="pp-github-token-input">
+              <input
+                type={showGithubToken ? "text" : "password"}
+                value={githubToken}
+                placeholder="需要仓库 Contents 写权限"
+                disabled={disabled || submitting}
+                autoComplete="off"
+                aria-describedby="pp-github-token-help"
+                onChange={(event) => {
+                  setPendingCicdSelected(false);
+                  setGithubToken(event.currentTarget.value);
+                }}
+              />
+              <button
+                type="button"
+                disabled={disabled || submitting}
+                onClick={() => setShowGithubToken((current) => !current)}
+                aria-label={showGithubToken ? "隐藏 Token" : "显示 Token"}
+                title={showGithubToken ? "隐藏 Token" : "显示 Token"}
+              >
+                <GithubTokenEyeIcon hidden={!showGithubToken} />
+              </button>
+            </span>
+            <small id="pp-github-token-help" className="pp-github-token-help">
+              Token 仅用于本次操作，成功后不会保留在表单中。
+            </small>
           </label>
           <label className="pp-github-cicd-field">
             <span>目标分支</span>

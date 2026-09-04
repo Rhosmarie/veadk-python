@@ -6,6 +6,12 @@ export interface GitHubPullRequestResult {
   branch: string;
 }
 
+export interface GitHubPullRequestReviewResult {
+  status: "started";
+  sessionId: string;
+  displayName: string;
+}
+
 export interface GitHubPullRequestFile {
   path: string;
   content: string;
@@ -42,6 +48,10 @@ const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const FILE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
 
 function sanitizeGitHubError(status: number, payload: GitHubPayload | null, token: string): string {
+  const message = String(payload?.message || "");
+  if (status === 403 && /workflow/i.test(message)) {
+    return "GitHub Token 缺少 Workflows 写权限，无法创建或更新 .github/workflows 下的文件";
+  }
   if (status === 401 || status === 403) {
     return "GitHub Token 无效或没有仓库写入权限";
   }
@@ -51,7 +61,7 @@ function sanitizeGitHubError(status: number, payload: GitHubPayload | null, toke
   if (status === 422) {
     return "GitHub 拒绝了提交，请检查分支和文件状态";
   }
-  const detail = String(payload?.message || "").split(token).join("***").trim();
+  const detail = message.split(token).join("***").trim();
   return detail.slice(0, 240) || `GitHub 请求失败（HTTP ${status}）`;
 }
 
@@ -264,5 +274,53 @@ export async function createGitHubPullRequest(
         method: "DELETE",
       }).catch(() => undefined);
     }
+  }
+}
+
+export async function startGitHubPullRequestReview(
+  input: {
+    pullRequestUrl: string;
+    githubToken: string;
+  },
+  signal: AbortSignal,
+): Promise<GitHubPullRequestReviewResult> {
+  const response = await fetch("/web/github/pull-request-reviews", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) {
+    throw await responseErrorFromGitHubReview(response);
+  }
+  const value = (await response.json()) as Partial<GitHubPullRequestReviewResult>;
+  if (
+    value.status !== "started" ||
+    typeof value.sessionId !== "string" ||
+    !value.sessionId ||
+    typeof value.displayName !== "string"
+  ) {
+    throw new Error("PR 评审服务返回了无效结果。");
+  }
+  return value as GitHubPullRequestReviewResult;
+}
+
+async function responseErrorFromGitHubReview(response: Response): Promise<Error> {
+  const text = await response.text().catch(() => "");
+  try {
+    const payload = JSON.parse(text) as {
+      detail?: { message?: unknown } | string;
+      message?: unknown;
+      error?: unknown;
+    };
+    const detail = typeof payload.detail === "object" && payload.detail
+      ? payload.detail.message
+      : payload.detail ?? payload.message ?? payload.error;
+    const detailText = typeof detail === "string" ? detail : "";
+    return new Error(
+      detailText || `PR 评审发起失败（HTTP ${response.status}）`,
+    );
+  } catch {
+    return new Error(text || `PR 评审发起失败（HTTP ${response.status}）`);
   }
 }

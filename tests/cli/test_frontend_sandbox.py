@@ -2422,6 +2422,7 @@ async def test_service_passes_allowed_session_environment_to_gateway() -> None:
         "MODEL_BASE_URL": "https://ark.cn-beijing.volces.com/api/v3",
         "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/v3",
         "CODEX_CONFIG_TOML": 'model = "doubao-seed-2-1-pro-260628"',
+        "GH_TOKEN": "github-secret-token",
     }
 
     await service.create(

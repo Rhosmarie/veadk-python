@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -74,18 +78,72 @@ test("generates the isolated pull request review workflow in frontend", async ()
   );
   const workflow = buildPullRequestReviewWorkflow({
     sandboxToolId: "tool-code-review",
-    modelName: "doubao-seed-code-preview",
-    modelBaseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
     region: "cn-beijing",
   });
   assert.doesNotMatch(workflow, /pull_request_target/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(workflow, /agentkit sandbox exec \\/);
-  assert.match(workflow, /--copy \. \/workspace \\/);
-  assert.match(workflow, /codex review --base \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
-  assert.match(workflow, /agentkit sandbox delete \\/);
-  assert.match(workflow, /\$\{\{ secrets\.CODEX_MODEL_API_KEY \}\}/);
-  assert.match(workflow, /re\.sub\(r"\\x1b\\\[/);
+  assert.match(workflow, /GH_TOKEN secret is required for PR review/);
+  assert.match(workflow, /secret must not contain spaces or newlines/);
+  assert.match(workflow, /Install AgentKit SDK/);
+  assert.match(workflow, /websockets>=12,<16/);
+  assert.match(workflow, /Start review in Sandbox Session/);
+  assert.match(workflow, /CreateSessionRequest/);
+  assert.match(workflow, /GetSessionRequest/);
+  assert.match(workflow, /client\.get_session/);
+  assert.match(workflow, /AGENTKIT_SANDBOX_TOOL_ID: "tool-code-review"/);
+  assert.match(workflow, /tool_id = os\.environ\["AGENTKIT_SANDBOX_TOOL_ID"\]\.strip\(\)/);
+  assert.doesNotMatch(workflow, /list_tools|Ready CodeEnv Sandbox Tool|FiltersItemForListTools/);
+  assert.match(workflow, /env_item\(Key="GH_TOKEN", Value=github_token\)/);
+  assert.match(workflow, /env_item\(Key="CODEX_CONFIG_TOML", Value=codex_config\)/);
+  assert.match(workflow, /env_item\(Key="CODEX_MODEL_CATALOG_JSON", Value=codex_model_catalog\)/);
+  assert.match(workflow, /authoritative = _get_authoritative_session\(client, tool_id, instance_id\)/);
+  assert.match(workflow, /endpoint = _session_value\(authoritative, "endpoint", "Endpoint"\) or created_endpoint/);
+  assert.match(workflow, /model_catalog_json = \\"\/home\/gem\/\.codex\/model-catalog\.json\\"/);
+  assert.match(workflow, /env_key = \\"CODEX_API_KEY\\"/);
+  assert.match(workflow, /CODEX_MODEL_CATALOG_JSON/);
+  assert.match(workflow, /experimental_supported_tools/);
+  assert.match(workflow, /\\"experimental_supported_tools\\":\[\]/);
+  assert.match(workflow, /websockets\.connect/);
+  assert.match(workflow, /"thread\/start"/);
+  assert.match(workflow, /"turn\/start"/);
+  assert.match(workflow, /"turn\/completed"/);
+  assert.match(workflow, /"experimentalApi": False/);
+  assert.doesNotMatch(workflow, /"experimentalApi": True/);
+  assert.match(workflow, /def _runtime_permission_params/);
+  assert.match(workflow, /"approvalPolicy": "on-request"/);
+  assert.match(workflow, /"approvalsReviewer": "user"/);
+  assert.match(workflow, /"sandboxPolicy": \{/);
+  assert.match(workflow, /"type": "workspaceWrite"/);
+  assert.match(workflow, /"networkAccess": False/);
+  assert.match(workflow, /"excludeTmpdirEnvVar": False/);
+  assert.match(workflow, /item\/permissions\/requestApproval/);
+  assert.match(workflow, /"result": \{"decision": "accept"\}/);
+  assert.doesNotMatch(workflow, /unsupported server request|invalid params for/);
+  assert.doesNotMatch(workflow, /modelProvider\/capabilities\/read|namespaceTools|imageGeneration|webSearch/);
+  assert.match(workflow, /"thread\/start",\n\s+_runtime_permission_params\(\),/);
+  assert.match(workflow, /\*\*_runtime_permission_params\(cwd\)/);
+  assert.match(workflow, /请评审这个 Pull Request：\$\{\{ github\.event\.pull_request\.html_url \}\}/);
+  assert.match(workflow, /\$\{\{ secrets\.GH_TOKEN \}\}/);
+  const pythonScript = workflow.match(/python <<'PY'\n([\s\S]*?)\n\s+PY/)?.[1];
+  assert.ok(pythonScript);
+  const nonBlankPythonLines = pythonScript.split("\n").filter((line) => line.trim());
+  const commonIndent = Math.min(
+    ...nonBlankPythonLines.map((line) => line.match(/^ */)?.[0].length ?? 0),
+  );
+  const normalizedPythonScript = pythonScript
+    .split("\n")
+    .map((line) => line.slice(commonIndent))
+    .join("\n");
+  const tempDir = mkdtempSync(join(tmpdir(), "pr-review-workflow-"));
+  try {
+    const scriptPath = join(tempDir, "review.py");
+    writeFileSync(scriptPath, normalizedPythonScript);
+    execFileSync("python", ["-m", "py_compile", scriptPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+  assert.doesNotMatch(workflow, /agentkit sandbox delete \\/);
+  assert.doesNotMatch(workflow, /actions\/checkout|actions\/setup-node|agentkit sandbox exec|--copy|CODEX_MODEL_API_KEY|--model-name|--model-base-url|--model-api-key|gh pr review|review\.md|tee/);
   assert.doesNotMatch(workflow, /__GH__|__[A-Z_]+__/);
 });
 
@@ -106,13 +164,15 @@ test("rejects invalid Runtime and review settings before generating workflows", 
   );
   assert.throws(
     () => buildPullRequestReviewWorkflow({
-      sandboxToolId: "tool-code-review",
-      modelName: "review-model",
-      modelBaseUrl: "http://model.example.com/v1",
+      sandboxToolId: "bad tool id",
       region: "cn-beijing",
     }),
-    /HTTPS URL/,
+    /Codex 沙箱工具 ID/,
   );
+  assert.doesNotThrow(() => buildPullRequestReviewWorkflow({
+    sandboxToolId: "tool-code-review",
+    region: "cn-beijing",
+  }));
 });
 
 test("normalizes supported GitHub repository forms and rejects unsafe paths", async () => {
@@ -241,6 +301,62 @@ test("removes the temporary GitHub branch when file creation fails", async () =>
       /write failed/,
     );
     assert.equal(calls.some(({ init }) => init.method === "DELETE"), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: originalCrypto,
+    });
+  }
+});
+
+test("reports missing GitHub workflow permission clearly", async () => {
+  const { createGitHubPullRequest } = await loadTypeScriptModule(
+    "../src/adk/githubIntegration.ts",
+  );
+  const originalFetch = globalThis.fetch;
+  const originalCrypto = globalThis.crypto;
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method || "GET";
+    if (String(url).endsWith("/repos/acme/agent")) return jsonResponse(200, {});
+    if (String(url).includes("/git/ref/heads/main")) {
+      return jsonResponse(200, { object: { sha: "base-sha" } });
+    }
+    if (method === "POST" && String(url).endsWith("/git/refs")) return jsonResponse(201, {});
+    if (method === "GET" && String(url).includes("/contents/")) return jsonResponse(404, {});
+    if (method === "PUT") {
+      return jsonResponse(403, {
+        message: "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/test.yml` without workflow scope",
+      });
+    }
+    if (method === "DELETE") return jsonResponse(204);
+    throw new Error(`Unexpected request: ${method} ${url}`);
+  };
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "12345678-1234-1234-1234-123456789012" },
+  });
+
+  try {
+    await assert.rejects(
+      createGitHubPullRequest(
+        {
+          repository: "acme/agent",
+          baseBranch: "main",
+          token: "github-secret-token",
+          files: [{
+            path: ".github/workflows/test.yml",
+            content: "test",
+            commitMessage: "test",
+          }],
+          branchPrefix: "feat/test",
+          title: "test",
+          description: "test",
+        },
+        new AbortController().signal,
+      ),
+      /缺少 Workflows 写权限/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     Object.defineProperty(globalThis, "crypto", {

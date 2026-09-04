@@ -231,6 +231,7 @@ export interface SandboxStartOptions extends SandboxRequestOptions {
   displayName?: string;
   modelId?: string;
   persistent?: boolean;
+  envs?: Record<string, string>;
 }
 
 export interface SandboxSession {
@@ -1165,6 +1166,7 @@ function createSandboxClient(
           displayName: options.displayName?.trim() ?? "",
           ...(options.modelId?.trim() ? { modelId: options.modelId.trim() } : {}),
           ...(config.textOnly ? {} : { persistent: options.persistent ?? true }),
+          ...(options.envs ? { envs: options.envs } : {}),
         }),
         signal: options.signal,
       },

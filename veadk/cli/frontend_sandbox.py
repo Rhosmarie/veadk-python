@@ -147,6 +147,7 @@ _SESSION_CREATE_ENV_ALLOWLIST = frozenset(
         "CODEX_CONFIG_TOML",
         "CODEX_MODEL",
         "CODEX_MODEL_CATALOG_JSON",
+        "GH_TOKEN",
         "MODEL_BASE_URL",
         "OPENCODE_BASE_URL",
         "OPENCODE_MODEL",
@@ -160,6 +161,16 @@ _SESSION_MODEL_ENV_KEYS = frozenset(
     }
 )
 _SESSION_CODEX_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_GITHUB_PULL_REQUEST_URL_RE = re.compile(
+    r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?$"
+)
+_GITHUB_PULL_REQUEST_REVIEW_PROMPT = """请评审这个 Pull Request：{pull_request_url}
+
+要求：
+1.你需要遵守GitHub Skill，通过GitHubCLI获取PR信息、diff和必要的上下文
+2.遵守Code-Review Skill的规范，对PR进行CodeReview
+3.不要修改仓库文件，不要执行破坏性命令。
+4.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈"""
 
 
 class SandboxError(RuntimeError):
@@ -3447,29 +3458,75 @@ def mount_sandbox_routes(
     async def _start_sandbox_session(request: Request) -> dict[str, object]:
         owner_id = owner_resolver(request)
         try:
-            body = await request.body()
-            if body:
-                try:
-                    data = json.loads(body)
-                except (json.JSONDecodeError, UnicodeDecodeError) as error:
-                    raise SandboxValidationError(
-                        "创建智能体的请求不是有效 JSON。"
-                    ) from error
-                if not isinstance(data, dict):
-                    raise SandboxValidationError("创建智能体的请求格式无效。")
-            else:
-                data = {}
+            data = await _request_object(request)
             session = await service.create(
                 owner_id,
                 data.get("displayName", ""),
                 creator_resolver(request) if creator_resolver else owner_id,
                 data.get("persistent", True),
+                envs=data.get("envs") if "envs" in data else None,
             )
         except SandboxError as error:
             raise _http_error(error) from error
         return {
             **_public_session(session, owner_id),
             "toolName": STUDIO_SANDBOX_TOOL_NAME,
+        }
+
+    @app.post("/web/github/pull-request-reviews")
+    async def _start_github_pull_request_review(
+        request: Request,
+    ) -> dict[str, object]:
+        owner_id = owner_resolver(request)
+        creator_name = creator_resolver(request) if creator_resolver else owner_id
+        try:
+            data = await _request_object(request)
+            pull_request_url = data.get("pullRequestUrl")
+            if not isinstance(pull_request_url, str):
+                raise SandboxValidationError("Pull Request URL 必须是文本。")
+            pull_request_url = pull_request_url.strip()
+            match = _GITHUB_PULL_REQUEST_URL_RE.fullmatch(pull_request_url)
+            if match is None:
+                raise SandboxValidationError("请输入完整的 GitHub Pull Request URL。")
+            github_token = data.get("githubToken")
+            if not isinstance(github_token, str) or not github_token.strip():
+                raise SandboxValidationError("GitHub Token 不能为空。")
+            owner, repo, number = match.groups()
+            session = await service.create(
+                owner_id,
+                f"PR Review: {owner}/{repo}#{number}",
+                creator_name,
+                False,
+                envs={"GH_TOKEN": github_token},
+            )
+            await service.connect(session.instance_id, owner_id, is_admin=False)
+        except SandboxError as error:
+            raise _http_error(error) from error
+
+        prompt = _GITHUB_PULL_REQUEST_REVIEW_PROMPT.format(
+            pull_request_url=pull_request_url
+        )
+
+        async def _run_review_message() -> None:
+            try:
+                async for _event in service.stream_message(
+                    session.instance_id,
+                    owner_id,
+                    prompt,
+                ):
+                    pass
+            except SandboxError as error:
+                logger.warning(
+                    "GitHub pull request review message failed for session %s: %s",
+                    session.instance_id,
+                    _safe_error_message(error),
+                )
+
+        asyncio.create_task(_run_review_message())
+        return {
+            "status": "started",
+            "sessionId": session.instance_id,
+            "displayName": session.display_name,
         }
 
     @app.post("/web/sandbox/snapshots/{snapshot_id}/resume")

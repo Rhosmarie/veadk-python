@@ -52,6 +52,13 @@ test("renders the GitHub CICD panel from the project deployment sidebar", () => 
   assert.match(panelSource, /workflowPath/);
   assert.match(panelSource, /githubUrl/);
   assert.match(panelSource, /githubToken/);
+  assert.match(panelSource, /showGithubToken/);
+  assert.match(panelSource, /获取 Token/);
+  assert.match(panelSource, /github\.com\/settings\/personal-access-tokens\/new/);
+  assert.match(panelSource, /contents=write/);
+  assert.match(panelSource, /需要仓库 Contents 写权限/);
+  assert.match(panelSource, /Token 仅用于本次操作，成功后不会保留在表单中。/);
+  assert.match(panelSource, /aria-label=\{showGithubToken \? "隐藏 Token" : "显示 Token"\}/);
   assert.match(panelSource, /baseBranch/);
   assert.match(panelSource, /volcengineAccessKey/);
   assert.match(panelSource, /volcengineSecretKey/);
