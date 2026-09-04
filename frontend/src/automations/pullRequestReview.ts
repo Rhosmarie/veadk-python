@@ -2,6 +2,7 @@ import {
   createGitHubPullRequest,
   type GitHubAutomationRegion,
 } from "../adk/githubIntegration";
+import { getSystemInfo } from "../adk/client";
 import {
   baseBranchField,
   commonGitHubInput,
@@ -21,7 +22,7 @@ export function validatePullRequestReviewSettings(
   input: PullRequestReviewWorkflowInput,
 ): void {
   if (!SANDBOX_TOOL_ID_PATTERN.test(input.sandboxToolId)) {
-    throw new Error("Codex 沙箱工具 ID 格式不正确");
+    throw new Error("Codex Sandbox Tool 配置格式不正确");
   }
   if (!input.region) {
     throw new Error("地域不能为空");
@@ -421,6 +422,20 @@ jobs:
   );
 }
 
+async function resolveConfiguredCodexSandboxToolId(
+  signal: AbortSignal,
+): Promise<string> {
+  const systemInfo = await getSystemInfo(signal);
+  const codexTool = systemInfo.sandboxTools.find(
+    (tool) => tool.kind === "codex" && !tool.snapshot,
+  );
+  const toolId = codexTool?.toolId.trim() ?? "";
+  if (!toolId) {
+    throw new Error("管理员未配置 Codex Sandbox Tool，无法创建 PR 自动评审工作流。");
+  }
+  return toolId;
+}
+
 export const pullRequestReviewAutomation: GitHubAutomationDefinition = {
   id: "review",
   kind: "github",
@@ -435,13 +450,6 @@ export const pullRequestReviewAutomation: GitHubAutomationDefinition = {
   fields: [
     repositoryField,
     baseBranchField,
-    {
-      name: "sandboxToolId",
-      label: "Codex 沙箱工具 ID",
-      placeholder: "tool-xxxxxxxx",
-      help: "选择 Studio 中可与 Codex 智能体对话的 Sandbox Tool，不要使用普通 CodeEnv Tool。",
-      required: true,
-    },
   ],
   initialValues: initialAutomationValues(),
   regionHelp: "用于 GitHub Actions 创建评审 Sandbox Session",
@@ -450,8 +458,9 @@ export const pullRequestReviewAutomation: GitHubAutomationDefinition = {
     "VOLCENGINE_ACCESS_KEY：火山引擎访问密钥，用于 GitHub Actions 调用 AgentKit 创建隔离的评审 Sandbox Session。",
     "VOLCENGINE_SECRET_KEY：与 VOLCENGINE_ACCESS_KEY 配套的火山引擎密钥。不要填入模型 API Key 或 Studio API Token。",
   ],
-  submit(values, signal) {
+  async submit(values, signal) {
     const input = commonGitHubInput(values);
+    const sandboxToolId = await resolveConfiguredCodexSandboxToolId(signal);
     return createGitHubPullRequest(
       {
         ...input,
@@ -459,7 +468,7 @@ export const pullRequestReviewAutomation: GitHubAutomationDefinition = {
           {
             path: ".github/workflows/codex-pr-review.yml",
             content: buildPullRequestReviewWorkflow({
-              sandboxToolId: values.sandboxToolId.trim(),
+              sandboxToolId,
               region: input.region,
             }),
             commitMessage: "chore: configure PR automated review",

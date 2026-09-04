@@ -172,7 +172,7 @@ test("rejects invalid Runtime and review settings before generating workflows", 
       sandboxToolId: "bad tool id",
       region: "cn-beijing",
     }),
-    /Codex 沙箱工具 ID/,
+    /Codex Sandbox Tool/,
   );
   assert.doesNotThrow(() => buildPullRequestReviewWorkflow({
     sandboxToolId: "tool-code-review",

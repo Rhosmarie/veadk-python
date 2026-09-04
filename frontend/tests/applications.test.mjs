@@ -174,6 +174,10 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   assert.doesNotMatch(githubSource, /automation === "template"/);
   assert.match(templateSource, /normalizeRepositoryPath\(values\.projectPath, "agentkit-basic-agent"\)/);
   assert.doesNotMatch(reviewSource, /Sandbox Tool ID/);
+  assert.doesNotMatch(reviewSource, /Codex 沙箱工具 ID/);
+  assert.doesNotMatch(reviewSource, /name: "sandboxToolId"/);
+  assert.match(reviewSource, /getSystemInfo\(signal\)/);
+  assert.match(reviewSource, /tool\.kind === "codex" && !tool\.snapshot/);
   assert.doesNotMatch(reviewSource, /模型 API 地址/);
   assert.doesNotMatch(reviewSource, /CODEX_MODEL_API_KEY/);
   assert.match(reviewSource, /GH_TOKEN：GitHub fine-grained PAT/);

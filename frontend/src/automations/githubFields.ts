@@ -44,7 +44,6 @@ export function initialAutomationValues(
     projectPath: ".",
     runtimeName: "",
     runtimeId: "",
-    sandboxToolId: "",
     modelName: "",
     modelBaseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
     region: "cn-beijing",

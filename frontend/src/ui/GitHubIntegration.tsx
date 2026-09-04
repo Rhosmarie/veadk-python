@@ -93,9 +93,6 @@ function validateField(name: FieldName, value: string, required: boolean): strin
   if (name === "runtimeId" && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(text)) {
     return "Runtime ID 格式不正确";
   }
-  if (name === "sandboxToolId" && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(text)) {
-    return "Sandbox Tool ID 格式不正确";
-  }
   if (name === "modelName" && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(text)) {
     return "模型名称格式不正确";
   }
