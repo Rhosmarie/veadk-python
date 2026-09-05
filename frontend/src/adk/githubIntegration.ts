@@ -14,6 +14,13 @@ export interface GitHubPullRequestReviewResult {
   displayName: string;
 }
 
+export interface GitHubAppConfig {
+  configured: boolean;
+  appSlug: string;
+  installUrl: string;
+  reason: string;
+}
+
 export interface GitHubPullRequestFile {
   path: string;
   content: string;
@@ -282,7 +289,6 @@ export async function createGitHubPullRequest(
 export async function startGitHubPullRequestReview(
   input: {
     pullRequestUrl: string;
-    githubToken: string;
   },
   signal: AbortSignal,
 ): Promise<GitHubPullRequestReviewResult> {
@@ -308,6 +314,32 @@ export async function startGitHubPullRequestReview(
     throw new Error("PR 评审服务返回了无效结果。");
   }
   return value as GitHubPullRequestReviewResult;
+}
+
+export async function getGitHubAppConfig(
+  signal: AbortSignal,
+): Promise<GitHubAppConfig> {
+  const response = await studioFetch(
+    "/web/github/app/config",
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await responseErrorFromGitHubReview(response);
+  }
+  const value = (await response.json()) as Partial<GitHubAppConfig>;
+  if (
+    typeof value.configured !== "boolean" ||
+    typeof value.appSlug !== "string" ||
+    typeof value.installUrl !== "string" ||
+    typeof value.reason !== "string"
+  ) {
+    throw new Error("GitHub App 配置响应格式无效。");
+  }
+  return value as GitHubAppConfig;
 }
 
 async function responseErrorFromGitHubReview(response: Response): Promise<Error> {

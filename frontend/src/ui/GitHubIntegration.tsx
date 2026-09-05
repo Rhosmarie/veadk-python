@@ -8,7 +8,9 @@ import {
 } from "react";
 
 import {
+  getGitHubAppConfig,
   startGitHubPullRequestReview,
+  type GitHubAppConfig,
   type GitHubPullRequestResult,
   type GitHubPullRequestReviewResult,
   normalizeGitHubRepository,
@@ -132,6 +134,7 @@ function requiredMark(value: string, required: boolean) {
 
 export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: GitHubIntegrationProps) {
   const definition = getGitHubAutomation(automation);
+  const isPullRequestReview = automation === "review";
   const [form, setForm] = useState<AutomationFormValues>(() => ({
     ...definition.initialValues,
   }));
@@ -145,18 +148,49 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
   const [reviewResult, setReviewResult] = useState<GitHubPullRequestReviewResult | null>(null);
   const [reviewError, setReviewError] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [githubAppConfig, setGitHubAppConfig] = useState<GitHubAppConfig | null>(null);
+  const [githubAppError, setGitHubAppError] = useState("");
+  const [githubAppLoading, setGitHubAppLoading] = useState(isPullRequestReview);
   const submitAbortRef = useRef<AbortController | null>(null);
   const reviewAbortRef = useRef<AbortController | null>(null);
+  const githubAppAbortRef = useRef<AbortController | null>(null);
   const configuredRepositoryUrl = repositoryUrl(form.repository);
   const configuredRepository = configuredRepositoryUrl.replace("https://github.com/", "");
   const repositorySecretsUrl = configuredRepositoryUrl
     ? `${configuredRepositoryUrl}/settings/secrets/actions`
     : "";
+  const githubAppName = githubAppConfig?.appSlug || "agentkit-veadk-studio";
+  const githubAppInstallUrl = githubAppConfig?.installUrl || `https://github.com/apps/${githubAppName}/installations/new`;
 
   useEffect(() => () => {
     submitAbortRef.current?.abort();
     reviewAbortRef.current?.abort();
+    githubAppAbortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (!isPullRequestReview) return;
+    githubAppAbortRef.current?.abort();
+    const controller = new AbortController();
+    githubAppAbortRef.current = controller;
+    setGitHubAppLoading(true);
+    setGitHubAppError("");
+    void getGitHubAppConfig(controller.signal)
+      .then((config) => {
+        if (githubAppAbortRef.current !== controller) return;
+        setGitHubAppConfig(config);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted || githubAppAbortRef.current !== controller) return;
+        setGitHubAppError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (githubAppAbortRef.current === controller) {
+          githubAppAbortRef.current = null;
+          setGitHubAppLoading(false);
+        }
+      });
+  }, [isPullRequestReview]);
 
   const updateField = (name: FormFieldName, value: string) => {
     setForm((current) => ({ ...current, [name]: value }));
@@ -166,7 +200,7 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
   };
 
   const blurField = (name: FieldName) => {
-    const required = name === "token"
+    const required = (!isPullRequestReview && name === "token")
       || name === "pullRequestUrl"
       || definition.fields.find((field) => field.name === name)?.required === true;
     const value = name === "pullRequestUrl" ? pullRequestUrl : form[name as FormFieldName];
@@ -176,14 +210,17 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isPullRequestReview) return;
     const errors: Partial<Record<FieldName, string>> = {};
     for (const field of definition.fields) {
       const error = validateField(field.name, form[field.name], field.required);
       if (error) errors[field.name] = error;
     }
-    const tokenError = validateField("token", form.token, true);
-    if (tokenError) {
-      errors.token = tokenError;
+    if (!isPullRequestReview) {
+      const tokenError = validateField("token", form.token, true);
+      if (tokenError) {
+        errors.token = tokenError;
+      }
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length) return;
@@ -219,10 +256,8 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
   const startReview = async () => {
     const errors: Partial<Record<FieldName, string>> = {};
     const repositoryError = validateField("repository", form.repository, true);
-    const tokenError = validateField("token", form.token, true);
     const pullRequestError = validateField("pullRequestUrl", pullRequestUrl, true);
     if (repositoryError) errors.repository = repositoryError;
-    if (tokenError) errors.token = tokenError;
     if (pullRequestError) errors.pullRequestUrl = pullRequestError;
     if (!pullRequestError && !repositoryError) {
       try {
@@ -248,7 +283,6 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
       const nextResult = await startGitHubPullRequestReview(
         {
           pullRequestUrl: pullRequestUrl.trim(),
-          githubToken: form.token.trim(),
         },
         controller.signal,
       );
@@ -298,7 +332,9 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
         />
         <span id={`github-${name}-help`} className="github-field-help">
           {isRepository && configuredRepository
-            ? `将为 ${configuredRepository} 添加 PR 自动评审配置`
+            ? isPullRequestReview
+              ? `将使用 GitHub App 校验 ${configuredRepository} 的 Pull Request`
+              : `将为 ${configuredRepository} 添加 PR 自动评审配置`
             : help}
         </span>
         {fieldErrors[name] ? <span id={`github-${name}-error`} className="github-field-error" role="alert">{fieldErrors[name]}</span> : null}
@@ -326,151 +362,176 @@ export function GitHubIntegration({ automation, onBack, onOpenSandboxSession }: 
           </div>
           <form className="github-release-form" onSubmit={onSubmit} onKeyDown={stopComposingSubmit} noValidate>
             <div className="github-field-grid">
-              {definition.fields.map(field)}
-              <div className="github-field">
-                <label id="github-region-label">
-                  <span>地域</span>
-                  {requiredMark(form.region, true)}
-                </label>
-                <div
-                  className="pp-network-region github-region-picker"
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setRegionMenuOpen(false);
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="pp-region-trigger"
-                    aria-labelledby="github-region-label"
-                    aria-haspopup="listbox"
-                    aria-expanded={regionMenuOpen}
-                    onClick={() => setRegionMenuOpen((open) => !open)}
+              {definition.fields
+                .filter((fieldDefinition) => !isPullRequestReview || fieldDefinition.name === "repository")
+                .map(field)}
+              {!isPullRequestReview ? (
+                <div className="github-field">
+                  <label id="github-region-label">
+                    <span>地域</span>
+                    {requiredMark(form.region, true)}
+                  </label>
+                  <div
+                    className="pp-network-region github-region-picker"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setRegionMenuOpen(false);
+                    }}
                   >
-                    <span>{form.region === "cn-shanghai" ? "华东 2（上海）" : "华北 2（北京）"}</span>
-                    <ChevronIcon className={`pp-region-chevron${regionMenuOpen ? " is-open" : ""}`} />
-                  </button>
-                  {regionMenuOpen ? (
-                    <>
-                      <div className="menu-scrim" onClick={() => setRegionMenuOpen(false)} />
-                      <div className="pp-region-menu" role="listbox" aria-label="地域">
-                        {([
-                          { value: "cn-beijing", label: "华北 2（北京）" },
-                          { value: "cn-shanghai", label: "华东 2（上海）" },
-                        ] as const).map((region) => {
-                          const selected = region.value === form.region;
-                          return (
-                            <button
-                              key={region.value}
-                              type="button"
-                              role="option"
-                              aria-selected={selected}
-                              className={`pp-region-option${selected ? " is-selected" : ""}`}
-                              onClick={() => {
-                                updateField("region", region.value);
-                                setRegionMenuOpen(false);
-                              }}
-                            >
-                              <span>{region.label}</span>
-                              {selected ? <CheckIcon /> : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : null}
+                    <button
+                      type="button"
+                      className="pp-region-trigger"
+                      aria-labelledby="github-region-label"
+                      aria-haspopup="listbox"
+                      aria-expanded={regionMenuOpen}
+                      onClick={() => setRegionMenuOpen((open) => !open)}
+                    >
+                      <span>{form.region === "cn-shanghai" ? "华东 2（上海）" : "华北 2（北京）"}</span>
+                      <ChevronIcon className={`pp-region-chevron${regionMenuOpen ? " is-open" : ""}`} />
+                    </button>
+                    {regionMenuOpen ? (
+                      <>
+                        <div className="menu-scrim" onClick={() => setRegionMenuOpen(false)} />
+                        <div className="pp-region-menu" role="listbox" aria-label="地域">
+                          {([
+                            { value: "cn-beijing", label: "华北 2（北京）" },
+                            { value: "cn-shanghai", label: "华东 2（上海）" },
+                          ] as const).map((region) => {
+                            const selected = region.value === form.region;
+                            return (
+                              <button
+                                key={region.value}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                className={`pp-region-option${selected ? " is-selected" : ""}`}
+                                onClick={() => {
+                                  updateField("region", region.value);
+                                  setRegionMenuOpen(false);
+                                }}
+                              >
+                                <span>{region.label}</span>
+                                {selected ? <CheckIcon /> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                  <span className="github-field-help">
+                    {definition.regionHelp}
+                  </span>
                 </div>
-                <span className="github-field-help">
-                  {definition.regionHelp}
-                </span>
-              </div>
+              ) : null}
             </div>
 
-            <div className="github-field github-token-field">
-              <div className="github-token-label-row">
-                <label htmlFor="github-token">
-                  <span>GitHub Token</span>
-                  {requiredMark(form.token, true)}
-                </label>
-                <a
-                  className="github-field-action"
-                  href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Create%20a%20GitHub%20automation%20pull%20request&contents=write&pull_requests=write&workflows=write"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  创建 GitHub Token
-                  <ExternalIcon />
-                </a>
-              </div>
-              <div className="github-token-input">
-                <input
-                  id="github-token"
-                  type={showToken ? "text" : "password"}
-                  value={form.token}
-                  onChange={(event) => updateField("token", event.target.value)}
-                  onBlur={() => blurField("token")}
-                  autoComplete="off"
-                  required
-                  placeholder="需要 Contents、Pull requests、Workflows 写权限"
-                  aria-invalid={Boolean(fieldErrors.token)}
-                  aria-describedby={`github-token-help${fieldErrors.token ? " github-token-error" : ""}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowToken((current) => !current)}
-                  aria-label={showToken ? "隐藏 Token" : "显示 Token"}
-                  title={showToken ? "隐藏 Token" : "显示 Token"}
-                >
-                  <EyeIcon hidden={showToken} />
-                </button>
-              </div>
-              <span id="github-token-help" className="github-field-help">此处 Token 用于创建配置 PR；它不是 Sandbox 的通用必填项，且不会保存在浏览器或写入 PR</span>
-              {fieldErrors.token ? <span id="github-token-error" className="github-field-error" role="alert">{fieldErrors.token}</span> : null}
-            </div>
-
-            {submitError ? <div className="github-submit-message is-error" role="alert">{submitError}</div> : null}
-            {result ? (
-              <div className="github-submit-message is-success github-result-message" role="status">
+            {isPullRequestReview ? (
+              <div className={`github-app-card${githubAppConfig?.configured ? " is-ready" : ""}`}>
                 <div>
-                  <strong>配置 PR #{result.number} 已创建</strong>
-                  <span>合并后，后续同仓库 PR 会自动触发评审。</span>
+                  <strong>GitHub App 授权</strong>
+                  <span>
+                    {githubAppLoading
+                      ? "正在检查中心服务配置..."
+                      : githubAppConfig?.configured
+                        ? `安装 ${githubAppName} 到目标仓库后，PR 创建或更新会自动触发评审。`
+                        : githubAppError || githubAppConfig?.reason || "管理员未配置 GitHub App。"}
+                  </span>
                 </div>
-                <a className="github-result-link" href={result.url} target="_blank" rel="noreferrer">
-                  查看配置 PR
+                <a className="github-app-install-link" href={githubAppInstallUrl} target="_blank" rel="noreferrer">
+                  安装 GitHub App
                   <ExternalIcon />
                 </a>
               </div>
-            ) : null}
-
-            <div className="github-form-actions">
-              <div className="github-secrets-note">
-                <div className="github-secrets-header">
-                  <strong>合并配置 PR 前，请在目标仓库添加运行时密钥</strong>
-                  {repositorySecretsUrl ? (
-                    <a className="github-secrets-link" href={repositorySecretsUrl} target="_blank" rel="noreferrer">
-                      打开 Secrets 设置
+            ) : (
+              <>
+                <div className="github-field github-token-field">
+                  <div className="github-token-label-row">
+                    <label htmlFor="github-token">
+                      <span>GitHub Token</span>
+                      {requiredMark(form.token, true)}
+                    </label>
+                    <a
+                      className="github-field-action"
+                      href="https://github.com/settings/personal-access-tokens/new?name=VeADK%20Studio&description=Create%20a%20GitHub%20automation%20pull%20request&contents=write&pull_requests=write&workflows=write"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      创建 GitHub Token
                       <ExternalIcon />
                     </a>
-                  ) : null}
+                  </div>
+                  <div className="github-token-input">
+                    <input
+                      id="github-token"
+                      type={showToken ? "text" : "password"}
+                      value={form.token}
+                      onChange={(event) => updateField("token", event.target.value)}
+                      onBlur={() => blurField("token")}
+                      autoComplete="off"
+                      required
+                      placeholder="需要 Contents、Pull requests、Workflows 写权限"
+                      aria-invalid={Boolean(fieldErrors.token)}
+                      aria-describedby={`github-token-help${fieldErrors.token ? " github-token-error" : ""}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowToken((current) => !current)}
+                      aria-label={showToken ? "隐藏 Token" : "显示 Token"}
+                      title={showToken ? "隐藏 Token" : "显示 Token"}
+                    >
+                      <EyeIcon hidden={showToken} />
+                    </button>
+                  </div>
+                  <span id="github-token-help" className="github-field-help">此处 Token 用于创建配置 PR；它不是 Sandbox 的通用必填项，且不会保存在浏览器或写入 PR</span>
+                  {fieldErrors.token ? <span id="github-token-error" className="github-field-error" role="alert">{fieldErrors.token}</span> : null}
                 </div>
-                <span className="github-secrets-path">路径：Settings → Secrets and variables → Actions → Repository secrets</span>
-                <ul>
-                  {definition.secrets.map((secret) => {
-                    const [name, ...descriptionParts] = secret.split("：");
-                    return (
-                      <li key={secret}>
-                        <code>{name}</code>
-                        {descriptionParts.length ? <span>{descriptionParts.join("：")}</span> : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-              <button type="submit" disabled={submitting}>
-                {submitting ? "提交 PR 中…" : definition.submitLabel}
-              </button>
-            </div>
+
+                {submitError ? <div className="github-submit-message is-error" role="alert">{submitError}</div> : null}
+                {result ? (
+                  <div className="github-submit-message is-success github-result-message" role="status">
+                    <div>
+                      <strong>配置 PR #{result.number} 已创建</strong>
+                      <span>合并后，后续同仓库 PR 会自动触发评审。</span>
+                    </div>
+                    <a className="github-result-link" href={result.url} target="_blank" rel="noreferrer">
+                      查看配置 PR
+                      <ExternalIcon />
+                    </a>
+                  </div>
+                ) : null}
+
+                <div className="github-form-actions">
+                  <div className="github-secrets-note">
+                    <div className="github-secrets-header">
+                      <strong>合并配置 PR 前，请在目标仓库添加运行时密钥</strong>
+                      {repositorySecretsUrl ? (
+                        <a className="github-secrets-link" href={repositorySecretsUrl} target="_blank" rel="noreferrer">
+                          打开 Secrets 设置
+                          <ExternalIcon />
+                        </a>
+                      ) : null}
+                    </div>
+                    <span className="github-secrets-path">路径：Settings → Secrets and variables → Actions → Repository secrets</span>
+                    <ul>
+                      {definition.secrets.map((secret) => {
+                        const [name, ...descriptionParts] = secret.split("：");
+                        return (
+                          <li key={secret}>
+                            <code>{name}</code>
+                            {descriptionParts.length ? <span>{descriptionParts.join("：")}</span> : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                  <button type="submit" disabled={submitting}>
+                    {submitting ? "提交 PR 中…" : definition.submitLabel}
+                  </button>
+                </div>
+              </>
+            )}
           </form>
-          {automation === "review" ? (
+          {isPullRequestReview ? (
             <section className="github-review-now" aria-labelledby="github-review-now-title">
               <div className="github-review-now-copy">
                 <h2 id="github-review-now-title">立即评审一个 PR</h2>

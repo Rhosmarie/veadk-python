@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import re
 import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import replace
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -530,6 +532,189 @@ def test_sandbox_route_response_types_resolve_in_openapi() -> None:
 
         assert schema["openapi"]
         assert schema["paths"]
+
+
+def test_github_app_config_reports_install_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VEADK_GITHUB_APP_ID", "4830047")
+    monkeypatch.setenv("VEADK_GITHUB_APP_SLUG", "agentkit-veadk-studio")
+    monkeypatch.setenv("VEADK_GITHUB_APP_PRIVATE_KEY", "pem")
+    monkeypatch.setenv("VEADK_GITHUB_APP_WEBHOOK_SECRET", "secret")
+    client = TestClient(_app(_FakeGateway()))
+
+    response = client.get("/web/github/app/config", headers={"X-Test-User": "alice"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": True,
+        "appSlug": "agentkit-veadk-studio",
+        "installUrl": "https://github.com/apps/agentkit-veadk-studio/installations/new",
+        "reason": "",
+    }
+
+
+def test_pull_request_review_always_uses_github_app_installation_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VEADK_GITHUB_APP_ID", "4830047")
+    monkeypatch.setenv("VEADK_GITHUB_APP_SLUG", "agentkit-veadk-studio")
+    monkeypatch.setenv("VEADK_GITHUB_APP_PRIVATE_KEY", "pem")
+    monkeypatch.setenv("VEADK_GITHUB_APP_WEBHOOK_SECRET", "secret")
+    calls: list[tuple[str, object]] = []
+
+    class _FakeGitHubAppClient:
+        def __init__(self, config: object) -> None:
+            calls.append(("init", config))
+
+        async def repository_installation_id(self, owner: str, repo: str) -> int:
+            calls.append(("repository", f"{owner}/{repo}"))
+            return 987
+
+        async def installation_token(self, installation_id: int) -> str:
+            calls.append(("installation", installation_id))
+            return "app-installation-token"
+
+    monkeypatch.setattr(frontend_sandbox, "GitHubAppClient", _FakeGitHubAppClient)
+    gateway = _FakeGateway()
+    client = TestClient(_app(gateway))
+
+    response = client.post(
+        "/web/github/pull-request-reviews",
+        json={"pullRequestUrl": "https://github.com/Rhosmarie/nice/pull/23"},
+        headers={"X-Test-User": "alice"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "started"
+    assert ("repository", "Rhosmarie/nice") in calls
+    assert ("installation", 987) in calls
+    assert gateway.envs[-1] == {
+        "GITHUB_TOKEN": "app-installation-token",
+        "GH_PROMPT_DISABLED": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def test_github_app_webhook_starts_pull_request_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VEADK_GITHUB_APP_ID", "4830047")
+    monkeypatch.setenv("VEADK_GITHUB_APP_SLUG", "agentkit-veadk-studio")
+    monkeypatch.setenv("VEADK_GITHUB_APP_PRIVATE_KEY", "pem")
+    monkeypatch.setenv("VEADK_GITHUB_APP_WEBHOOK_SECRET", "secret")
+    calls: list[tuple[str, object]] = []
+
+    class _FakeGitHubAppClient:
+        def __init__(self, config: object) -> None:
+            calls.append(("init", config))
+
+        async def installation_token(self, installation_id: int) -> str:
+            calls.append(("installation", installation_id))
+            return "webhook-installation-token"
+
+    monkeypatch.setattr(frontend_sandbox, "GitHubAppClient", _FakeGitHubAppClient)
+    gateway = _FakeGateway()
+    client = TestClient(_app(gateway))
+    payload = {
+        "action": "opened",
+        "installation": {"id": 456},
+        "repository": {"full_name": "Rhosmarie/nice"},
+        "pull_request": {
+            "number": 23,
+            "html_url": "https://github.com/Rhosmarie/nice/pull/23",
+            "draft": False,
+            "head": {"repo": {"full_name": "Rhosmarie/nice"}},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    signature = "sha256=" + hmac.new(b"secret", body, sha256).hexdigest()
+
+    response = client.post(
+        "/web/github/app/webhook",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "delivery-1",
+            "X-Hub-Signature-256": signature,
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "started"
+    assert ("installation", 456) in calls
+    assert gateway.display_names[-1] == "PR Review: Rhosmarie/nice#23"
+    assert gateway.envs[-1] == {
+        "GITHUB_TOKEN": "webhook-installation-token",
+        "GH_PROMPT_DISABLED": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def test_github_app_webhook_retries_pr_review_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VEADK_GITHUB_APP_ID", "4830047")
+    monkeypatch.setenv("VEADK_GITHUB_APP_SLUG", "agentkit-veadk-studio")
+    monkeypatch.setenv("VEADK_GITHUB_APP_PRIVATE_KEY", "pem")
+    monkeypatch.setenv("VEADK_GITHUB_APP_WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(
+        frontend_sandbox,
+        "_GITHUB_PR_REVIEW_CONNECT_RETRY_SECONDS",
+        0,
+    )
+
+    class _FakeGitHubAppClient:
+        def __init__(self, config: object) -> None:
+            del config
+
+        async def installation_token(self, installation_id: int) -> str:
+            assert installation_id == 456
+            return "webhook-installation-token"
+
+    class _FlakyGateway(_FakeGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.open_codex_calls = 0
+
+        async def open_codex(self, session: SandboxCloudSession) -> _FakeCodex:
+            self.open_codex_calls += 1
+            if self.open_codex_calls == 1:
+                raise frontend_sandbox.SandboxInvocationError(
+                    "server rejected WebSocket connection: HTTP 200"
+                )
+            return await super().open_codex(session)
+
+    monkeypatch.setattr(frontend_sandbox, "GitHubAppClient", _FakeGitHubAppClient)
+    gateway = _FlakyGateway()
+    client = TestClient(_app(gateway))
+    payload = {
+        "action": "opened",
+        "installation": {"id": 456},
+        "repository": {"full_name": "Rhosmarie/nice"},
+        "pull_request": {
+            "number": 23,
+            "html_url": "https://github.com/Rhosmarie/nice/pull/23",
+            "draft": False,
+            "head": {"repo": {"full_name": "Rhosmarie/nice"}},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    signature = "sha256=" + hmac.new(b"secret", body, sha256).hexdigest()
+
+    response = client.post(
+        "/web/github/app/webhook",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "delivery-1",
+            "X-Hub-Signature-256": signature,
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "started"
+    assert gateway.open_codex_calls == 2
 
 
 @pytest.mark.parametrize(

@@ -75,6 +75,14 @@ from veadk.cli.frontend_sandbox_proxy import (
     terminal_launch_url,
     upload_sandbox_file,
 )
+from veadk.cli.github_app_pr_review import (
+    GitHubAppClient,
+    GitHubAppReviewError,
+    github_app_public_config,
+    load_github_app_config,
+    parse_pull_request_event,
+    verify_webhook_signature,
+)
 from veadk.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -130,6 +138,8 @@ _CODEX_PROJECT_HANDOFF_HISTORY_IMAGE_MIME_TYPES = frozenset(
     {"image/png", "image/jpeg", "image/gif", "image/webp"}
 )
 _CODEX_PROJECT_HANDOFF_CONTINUATION_MAX_CHARACTERS = 20_000
+_GITHUB_PR_REVIEW_CONNECT_ATTEMPTS = 3
+_GITHUB_PR_REVIEW_CONNECT_RETRY_SECONDS = 2.0
 _CODEX_PROJECT_HANDOFF_FIRST_EVENT_TIMEOUT_SECONDS = 120
 _CODEX_PROJECT_HANDOFF_PROGRESS_HEARTBEAT_SECONDS = 15
 _CODEX_PROJECT_HANDOFF_PERMISSIONS = CodexPermissionSettings(
@@ -148,6 +158,9 @@ _SESSION_CREATE_ENV_ALLOWLIST = frozenset(
         "CODEX_MODEL",
         "CODEX_MODEL_CATALOG_JSON",
         "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_PROMPT_DISABLED",
+        "GIT_TERMINAL_PROMPT",
         "MODEL_BASE_URL",
         "OPENCODE_BASE_URL",
         "OPENCODE_MODEL",
@@ -169,8 +182,10 @@ _GITHUB_PULL_REQUEST_REVIEW_PROMPT = """请评审这个 Pull Request：{pull_req
 要求：
 1.你需要遵守GitHub Skill，通过GitHubCLI获取PR信息、diff和必要的上下文
 2.遵守Code-Review Skill的规范，对PR进行CodeReview
-3.不要修改仓库文件，不要执行破坏性命令。
-4.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈"""
+3.GitHub CLI 已通过 GitHub App installation token 授权；禁止执行 gh auth login、禁止请求设备码或浏览器授权。如果 gh 提示需要登录，请直接报告 GitHub App token 不可用或权限不足。
+4.不要修改仓库文件，不要执行破坏性命令。
+5.评审完成后，必须使用 GitHub CLI 将评审结论评论到这个 Pull Request。
+6.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈"""
 
 
 class SandboxError(RuntimeError):
@@ -3473,6 +3488,181 @@ def mount_sandbox_routes(
             "toolName": STUDIO_SANDBOX_TOOL_NAME,
         }
 
+    def _github_app_http_error(
+        error: GitHubAppReviewError,
+        *,
+        status_code: int = 503,
+    ) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "code": "GITHUB_APP_REVIEW_ERROR",
+                "message": str(error),
+                "retryable": False,
+            },
+        )
+
+    async def _github_app_installation_token_for_pull_request(
+        owner: str,
+        repo: str,
+    ) -> str:
+        config = load_github_app_config()
+        if config is None:
+            raise GitHubAppReviewError("管理员未配置 GitHub App。")
+        client = GitHubAppClient(config)
+        installation_id = await client.repository_installation_id(owner, repo)
+        return await client.installation_token(installation_id)
+
+    async def _create_github_pull_request_review_session(
+        *,
+        owner_id: str,
+        creator_name: str,
+        pull_request_url: str,
+        installation_token: str,
+    ) -> SandboxCloudSession:
+        match = _GITHUB_PULL_REQUEST_URL_RE.fullmatch(pull_request_url)
+        if match is None:
+            raise SandboxValidationError("请输入完整的 GitHub Pull Request URL。")
+        owner, repo, number = match.groups()
+        session = await service.create(
+            owner_id,
+            f"PR Review: {owner}/{repo}#{number}",
+            creator_name,
+            False,
+            envs={
+                "GITHUB_TOKEN": installation_token,
+                "GH_PROMPT_DISABLED": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            },
+        )
+        await _connect_github_pull_request_review_session(
+            session.instance_id,
+            owner_id,
+        )
+        return session
+
+    async def _connect_github_pull_request_review_session(
+        session_id: str,
+        owner_id: str,
+    ) -> None:
+        last_error: SandboxInvocationError | None = None
+        for attempt in range(_GITHUB_PR_REVIEW_CONNECT_ATTEMPTS):
+            try:
+                await service.connect(session_id, owner_id, is_admin=False)
+                return
+            except SandboxInvocationError as error:
+                last_error = error
+                if attempt + 1 >= _GITHUB_PR_REVIEW_CONNECT_ATTEMPTS:
+                    break
+                logger.info(
+                    "Retrying GitHub PR review sandbox connection for session %s "
+                    "after startup failure: %s",
+                    session_id,
+                    _safe_error_message(error),
+                )
+                await asyncio.sleep(_GITHUB_PR_REVIEW_CONNECT_RETRY_SECONDS)
+        if last_error is not None:
+            raise last_error
+
+    def _schedule_github_pull_request_review_message(
+        *,
+        session_id: str,
+        owner_id: str,
+        pull_request_url: str,
+    ) -> None:
+        prompt = _GITHUB_PULL_REQUEST_REVIEW_PROMPT.format(
+            pull_request_url=pull_request_url
+        )
+
+        async def _run_review_message() -> None:
+            try:
+                async for _event in service.stream_message(
+                    session_id,
+                    owner_id,
+                    prompt,
+                ):
+                    pass
+            except SandboxError as error:
+                logger.warning(
+                    "GitHub pull request review message failed for session %s: %s",
+                    session_id,
+                    _safe_error_message(error),
+                )
+
+        asyncio.create_task(_run_review_message())
+
+    @app.get("/web/github/app/config")
+    async def _github_app_config(request: Request) -> dict[str, object]:
+        owner_resolver(request)
+        return github_app_public_config()
+
+    @app.post("/web/github/app/webhook", status_code=202)
+    async def _github_app_webhook(request: Request) -> dict[str, object]:
+        try:
+            config = load_github_app_config()
+            if config is None:
+                raise GitHubAppReviewError("管理员未配置 GitHub App。")
+            body = await request.body()
+            signature = request.headers.get("X-Hub-Signature-256", "")
+            if not verify_webhook_signature(
+                body,
+                signature,
+                config.webhook_secret,
+            ):
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "GITHUB_WEBHOOK_SIGNATURE_INVALID",
+                        "message": "GitHub webhook 签名无效。",
+                        "retryable": False,
+                    },
+                )
+            try:
+                payload = json.loads(body) if body else {}
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise SandboxValidationError(
+                    "GitHub webhook 不是有效 JSON。"
+                ) from error
+            if not isinstance(payload, dict):
+                raise SandboxValidationError("GitHub webhook 必须是 JSON 对象。")
+            event = parse_pull_request_event(
+                payload,
+                event_name=request.headers.get("X-GitHub-Event", ""),
+                delivery_id=request.headers.get("X-GitHub-Delivery", ""),
+            )
+            if event is None:
+                return {"status": "ignored", "reason": "unsupported-event"}
+            if not event.should_review:
+                return {
+                    "status": "ignored",
+                    "reason": "pull-request-not-reviewable",
+                    "action": event.action,
+                }
+            client = GitHubAppClient(config)
+            installation_token = await client.installation_token(event.installation_id)
+            session = await _create_github_pull_request_review_session(
+                owner_id=config.review_owner_id,
+                creator_name=config.review_creator_name,
+                pull_request_url=event.pull_request_url,
+                installation_token=installation_token,
+            )
+            _schedule_github_pull_request_review_message(
+                session_id=session.instance_id,
+                owner_id=config.review_owner_id,
+                pull_request_url=event.pull_request_url,
+            )
+        except SandboxError as error:
+            raise _http_error(error) from error
+        except GitHubAppReviewError as error:
+            raise _github_app_http_error(error) from error
+
+        return {
+            "status": "started",
+            "sessionId": session.instance_id,
+            "displayName": session.display_name,
+            "deliveryId": event.delivery_id,
+        }
+
     @app.post("/web/github/pull-request-reviews")
     async def _start_github_pull_request_review(
         request: Request,
@@ -3488,41 +3678,27 @@ def mount_sandbox_routes(
             match = _GITHUB_PULL_REQUEST_URL_RE.fullmatch(pull_request_url)
             if match is None:
                 raise SandboxValidationError("请输入完整的 GitHub Pull Request URL。")
-            github_token = data.get("githubToken")
-            if not isinstance(github_token, str) or not github_token.strip():
-                raise SandboxValidationError("GitHub Token 不能为空。")
-            owner, repo, number = match.groups()
-            session = await service.create(
-                owner_id,
-                f"PR Review: {owner}/{repo}#{number}",
-                creator_name,
-                False,
-                envs={"GH_TOKEN": github_token},
+            owner, repo, _number = match.groups()
+            installation_token = await _github_app_installation_token_for_pull_request(
+                owner,
+                repo,
             )
-            await service.connect(session.instance_id, owner_id, is_admin=False)
+            session = await _create_github_pull_request_review_session(
+                owner_id=owner_id,
+                creator_name=creator_name,
+                pull_request_url=pull_request_url,
+                installation_token=installation_token,
+            )
         except SandboxError as error:
             raise _http_error(error) from error
+        except GitHubAppReviewError as error:
+            raise _github_app_http_error(error) from error
 
-        prompt = _GITHUB_PULL_REQUEST_REVIEW_PROMPT.format(
-            pull_request_url=pull_request_url
+        _schedule_github_pull_request_review_message(
+            session_id=session.instance_id,
+            owner_id=owner_id,
+            pull_request_url=pull_request_url,
         )
-
-        async def _run_review_message() -> None:
-            try:
-                async for _event in service.stream_message(
-                    session.instance_id,
-                    owner_id,
-                    prompt,
-                ):
-                    pass
-            except SandboxError as error:
-                logger.warning(
-                    "GitHub pull request review message failed for session %s: %s",
-                    session.instance_id,
-                    _safe_error_message(error),
-                )
-
-        asyncio.create_task(_run_review_message())
         return {
             "status": "started",
             "sessionId": session.instance_id,

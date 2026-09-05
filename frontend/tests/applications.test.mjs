@@ -179,18 +179,21 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   assert.match(githubSource, /需要 Contents、Pull requests、Workflows 写权限/);
   assert.match(githubSource, /此处 Token 用于创建配置 PR；它不是 Sandbox 的通用必填项/);
   assert.doesNotMatch(githubSource, /required \? "必填" : "可选"/);
-  assert.match(githubSource, /definition\.fields\.map\(field\)/);
+  assert.match(githubSource, /definition\.fields[\s\S]*?\.map\(field\)/);
   assert.doesNotMatch(githubSource, /automation === "template"/);
   assert.match(templateSource, /normalizeRepositoryPath\(values\.projectPath, "agentkit-basic-agent"\)/);
   assert.doesNotMatch(reviewSource, /Sandbox Tool ID/);
   assert.doesNotMatch(reviewSource, /Codex 沙箱工具 ID/);
   assert.doesNotMatch(reviewSource, /name: "sandboxToolId"/);
-  assert.match(reviewSource, /getSystemInfo\(signal\)/);
-  assert.match(reviewSource, /tool\.kind === "codex" && !tool\.snapshot/);
+  assert.doesNotMatch(reviewSource, /getSystemInfo/);
+  assert.doesNotMatch(reviewSource, /createGitHubPullRequest/);
+  assert.doesNotMatch(reviewSource, /\.github\/workflows/);
+  assert.doesNotMatch(reviewSource, /GH_TOKEN|Repository secrets|Workflows/);
   assert.doesNotMatch(reviewSource, /模型 API 地址/);
   assert.doesNotMatch(reviewSource, /CODEX_MODEL_API_KEY/);
-  assert.match(reviewSource, /GH_TOKEN：目标仓库 fine-grained PAT/);
-  assert.match(reviewSource, /Contents、Pull requests、Workflows 读写权限/);
+  assert.match(reviewSource, /GitHub App/);
+  assert.match(githubSource, /getGitHubAppConfig/);
+  assert.match(githubSource, /安装 GitHub App/);
   assert.match(githubSource, /立即评审一个 PR/);
   assert.match(githubSource, /className="github-field-note">必须属于上方 GitHub Repo/);
   assert.doesNotMatch(githubSource, /新建一次性 Codex Sandbox Session/);
@@ -245,7 +248,7 @@ test("GitHub detail keeps credentials ephemeral and exposes accessible submissio
   );
   assert.match(deliverySource, /createGitHubPullRequest/);
   assert.match(templateSource, /createGitHubPullRequest/);
-  assert.match(reviewSource, /createGitHubPullRequest/);
+  assert.doesNotMatch(reviewSource, /createGitHubPullRequest/);
   assert.doesNotMatch(apiSource, /\/web\/integrations\/github/);
   assert.doesNotMatch(cliFrontendSource, /frontend_github_integration/);
   assert.equal(

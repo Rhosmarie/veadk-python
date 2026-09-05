@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -72,91 +68,28 @@ test("generates the basic Studio project and Runtime delivery workflow in fronte
   assert.doesNotMatch(workflow, /__[A-Z_]+__/);
 });
 
-test("generates the isolated pull request review workflow in frontend", async () => {
-  const { buildPullRequestReviewWorkflow } = await loadTypeScriptModule(
+test("defines pull request review as a GitHub App automation", async () => {
+  const { pullRequestReviewAutomation } = await loadTypeScriptModule(
     "../src/automations/pullRequestReview.ts",
   );
-  const workflow = buildPullRequestReviewWorkflow({
-    sandboxToolId: "tool-code-review",
-    region: "cn-beijing",
-  });
-  assert.doesNotMatch(workflow, /pull_request_target/);
-  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(workflow, /GH_TOKEN secret is required for PR review/);
-  assert.match(workflow, /secret must not contain spaces or newlines/);
-  assert.match(workflow, /Install AgentKit SDK/);
-  assert.match(workflow, /websockets>=12,<16/);
-  assert.match(workflow, /Start review in Sandbox Session/);
-  assert.match(workflow, /CreateSessionRequest/);
-  assert.match(workflow, /GetSessionRequest/);
-  assert.match(workflow, /client\.get_session/);
-  assert.match(workflow, /AGENTKIT_SANDBOX_TOOL_ID: "tool-code-review"/);
-  assert.match(workflow, /tool_id = os\.environ\["AGENTKIT_SANDBOX_TOOL_ID"\]\.strip\(\)/);
-  assert.doesNotMatch(workflow, /list_tools|Ready CodeEnv Sandbox Tool|FiltersItemForListTools/);
-  assert.match(workflow, /env_item\(Key="GH_TOKEN", Value=github_token\)/);
-  assert.match(workflow, /env_item\(Key="GITHUB_TOKEN", Value=github_api_token\)/);
-  assert.match(workflow, /env_item\(Key="GH_PROMPT_DISABLED", Value="1"\)/);
-  assert.match(workflow, /env_item\(Key="GIT_TERMINAL_PROMPT", Value="0"\)/);
-  assert.doesNotMatch(workflow, /CODEX_CONFIG_TOML|CODEX_MODEL_CATALOG_JSON/);
-  assert.match(workflow, /authoritative = _get_authoritative_session\(client, tool_id, instance_id\)/);
-  assert.match(workflow, /endpoint = _session_value\(authoritative, "endpoint", "Endpoint"\) or created_endpoint/);
-  assert.doesNotMatch(workflow, /model_catalog_json|env_key = \\"CODEX_API_KEY\\"|experimental_supported_tools/);
-  assert.match(workflow, /websockets\.connect/);
-  assert.match(workflow, /"thread\/start"/);
-  assert.match(workflow, /"turn\/start"/);
-  assert.match(workflow, /"turn\/completed"/);
-  assert.match(workflow, /"experimentalApi": True/);
-  assert.doesNotMatch(workflow, /"experimentalApi": False/);
-  assert.match(workflow, /def _runtime_permission_params/);
-  assert.match(workflow, /"approvalPolicy": "on-request"/);
-  assert.match(workflow, /"approvalsReviewer": "user"/);
-  assert.match(workflow, /"sandboxPolicy": \{/);
-  assert.match(workflow, /"type": "workspaceWrite"/);
-  assert.match(workflow, /"networkAccess": False/);
-  assert.match(workflow, /"excludeTmpdirEnvVar": False/);
-  assert.match(workflow, /item\/permissions\/requestApproval/);
-  assert.match(workflow, /"result": \{"decision": "accept"\}/);
-  assert.match(workflow, /unsupported server request/);
-  assert.match(workflow, /invalid params for/);
-  assert.match(workflow, /"name": "agentkit_codex_app_server_client"/);
-  assert.match(workflow, /"title": "AgentKit Studio"/);
-  assert.doesNotMatch(workflow, /modelProvider\/capabilities\/read|namespaceTools|imageGeneration|webSearch/);
-  assert.match(workflow, /"thread\/start",\n\s+_runtime_permission_params\(\),/);
-  assert.match(workflow, /\*\*_runtime_permission_params\(cwd\)/);
-  assert.match(workflow, /请评审这个 Pull Request：\$\{\{ github\.event\.pull_request\.html_url \}\}/);
-  assert.match(workflow, /禁止执行 gh auth login/);
-  assert.match(workflow, /\$\{\{ secrets\.GH_TOKEN \}\}/);
-  assert.match(workflow, /GITHUB_TOKEN: \$\{\{ secrets\.GH_TOKEN \}\}/);
-  assert.match(workflow, /GH_PROMPT_DISABLED: "1"/);
-  assert.match(workflow, /GIT_TERMINAL_PROMPT: "0"/);
-  const pythonScript = workflow.match(/python <<'PY'\n([\s\S]*?)\n\s+PY/)?.[1];
-  assert.ok(pythonScript);
-  const nonBlankPythonLines = pythonScript.split("\n").filter((line) => line.trim());
-  const commonIndent = Math.min(
-    ...nonBlankPythonLines.map((line) => line.match(/^ */)?.[0].length ?? 0),
+  assert.equal(pullRequestReviewAutomation.submitLabel, "安装 GitHub App");
+  assert.equal(pullRequestReviewAutomation.fields.length, 1);
+  assert.equal(pullRequestReviewAutomation.fields[0].name, "repository");
+  assert.deepEqual(pullRequestReviewAutomation.secrets, []);
+  assert.match(pullRequestReviewAutomation.panel, /GitHub App/);
+  await assert.rejects(
+    () => pullRequestReviewAutomation.submit(
+      pullRequestReviewAutomation.initialValues,
+      new AbortController().signal,
+    ),
+    /GitHub App 授权模式/,
   );
-  const normalizedPythonScript = pythonScript
-    .split("\n")
-    .map((line) => line.slice(commonIndent))
-    .join("\n");
-  const tempDir = mkdtempSync(join(tmpdir(), "pr-review-workflow-"));
-  try {
-    const scriptPath = join(tempDir, "review.py");
-    writeFileSync(scriptPath, normalizedPythonScript);
-    execFileSync("python", ["-m", "py_compile", scriptPath]);
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-  assert.doesNotMatch(workflow, /agentkit sandbox delete \\/);
-  assert.doesNotMatch(workflow, /actions\/checkout|actions\/setup-node|agentkit sandbox exec|--copy|CODEX_MODEL_API_KEY|--model-name|--model-base-url|--model-api-key|gh pr review|review\.md|tee/);
-  assert.doesNotMatch(workflow, /__GH__|__[A-Z_]+__/);
 });
 
-test("rejects invalid Runtime and review settings before generating workflows", async () => {
-  const [{ buildRuntimeDeliveryWorkflow }, { buildPullRequestReviewWorkflow }] = await Promise.all([
-    loadTypeScriptModule("../src/automations/runtimeDelivery.ts"),
-    loadTypeScriptModule("../src/automations/pullRequestReview.ts"),
-  ]);
+test("rejects invalid Runtime settings before generating workflows", async () => {
+  const { buildRuntimeDeliveryWorkflow } = await loadTypeScriptModule(
+    "../src/automations/runtimeDelivery.ts",
+  );
   assert.throws(
     () => buildRuntimeDeliveryWorkflow({
       baseBranch: "main",
@@ -167,17 +100,6 @@ test("rejects invalid Runtime and review settings before generating workflows", 
     }),
     /Runtime 名称/,
   );
-  assert.throws(
-    () => buildPullRequestReviewWorkflow({
-      sandboxToolId: "bad tool id",
-      region: "cn-beijing",
-    }),
-    /Codex Sandbox Tool/,
-  );
-  assert.doesNotThrow(() => buildPullRequestReviewWorkflow({
-    sandboxToolId: "tool-code-review",
-    region: "cn-beijing",
-  }));
 });
 
 test("normalizes supported GitHub repository forms and rejects unsafe paths", async () => {

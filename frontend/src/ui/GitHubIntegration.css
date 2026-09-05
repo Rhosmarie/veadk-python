@@ -127,6 +127,74 @@
 .github-submit-message a.github-result-link:hover { background: hsl(145 50% 31% / 0.08); text-decoration: none; }
 .github-submit-message a.github-result-link:focus-visible { outline: 2px solid hsl(var(--ring) / 0.35); outline-offset: 2px; }
 
+.github-app-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: border-box;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--muted) / 0.22);
+}
+
+.github-app-card.is-ready {
+  border-color: hsl(145 58% 34% / 0.22);
+  background: hsl(145 60% 42% / 0.06);
+}
+
+.github-app-card > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.github-app-card strong {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.github-app-card span {
+  color: hsl(var(--muted-foreground));
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.github-app-install-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 13px;
+  border: 1px solid hsl(var(--foreground));
+  border-radius: 8px;
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.github-app-install-link:hover {
+  background: hsl(var(--foreground) / 0.84);
+  text-decoration: none;
+}
+
+.github-app-install-link:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.35);
+  outline-offset: 2px;
+}
+
+.github-app-install-link svg { width: 13px; height: 13px; }
+
 .github-form-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; margin-top: 24px; padding-top: 20px; border-top: 1px solid hsl(var(--border)); }
 .github-secrets-note { grid-column: 1 / -1; width: 100%; max-width: 980px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--muted) / 0.22); color: hsl(var(--muted-foreground)); font-size: 12.5px; line-height: 1.5; }
 .github-secrets-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -192,6 +260,8 @@
   .github-integration-page { padding: 20px 18px 0; }
   .github-field-grid { grid-template-columns: minmax(0, 1fr); }
   .github-form-actions { grid-template-columns: minmax(0, 1fr); }
+  .github-app-card { align-items: stretch; flex-direction: column; }
+  .github-app-install-link { width: 100%; box-sizing: border-box; }
   .github-secrets-header { align-items: flex-start; flex-direction: column; gap: 6px; }
   .github-field-label-row { align-items: flex-start; flex-direction: column; gap: 4px; }
   .github-result-message { align-items: stretch; flex-direction: column; }
@@ -205,6 +275,7 @@
 @media (prefers-reduced-motion: reduce) {
   .github-back,
   .github-field input,
+  .github-app-install-link,
   .github-form-actions button,
   .github-review-now-actions button { transition: none; }
 }
