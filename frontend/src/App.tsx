@@ -114,6 +114,7 @@ import { CronJobs } from "./cronjobs/CronJobs";
 import { SystemInfo } from "./ui/SystemInfo";
 import { DeveloperResources } from "./ui/DeveloperResources";
 import { GitHubIntegration } from "./ui/GitHubIntegration";
+import { GitLabIntegration } from "./ui/GitLabIntegration";
 import { FeishuBotIntegration } from "./automations/feishu/FeishuBotIntegration";
 import { CodingAgentsIntegration } from "./automations/coding-agents/CodingAgentsIntegration";
 import { WebsiteIntegration } from "./automations/website-integration/WebsiteIntegration";
@@ -7053,6 +7054,13 @@ export default function App() {
             ) : applicationsView === "website-integration" ? (
               <WebsiteIntegration
                 onBack={() => setApplicationsView("catalog")}
+              />
+            ) : applicationsView === "gitlab-review" ? (
+              <GitLabIntegration
+                onBack={() => setApplicationsView("catalog")}
+                onOpenSandboxSession={(id) => {
+                  void openCodexSandboxSession(id);
+                }}
               />
             ) : applicationsView && applicationsView !== "catalog" ? (
               <GitHubIntegration

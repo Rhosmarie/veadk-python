@@ -617,6 +617,38 @@ def _github_app_review_environment(
     return environment
 
 
+def _gitlab_app_review_environment(
+    source: Mapping[str, str | None],
+) -> dict[str, str]:
+    """Return GitLab MR review settings safe to ship to the Studio runtime."""
+    from veadk.cli.gitlab_app_mr_review import (
+        GITLAB_BASE_URL_ENV,
+        GITLAB_GROUP_ID_OR_PATH_ENV,
+        GITLAB_REVIEW_CREATOR_ENV,
+        GITLAB_REVIEW_OWNER_ID_ENV,
+        GITLAB_TOKEN_ENV,
+        GITLAB_WEBHOOK_SECRET_ENV,
+        STUDIO_PUBLIC_BASE_URL_ENV,
+    )
+
+    def _value(key: str) -> str:
+        return str(os.getenv(key) or source.get(key) or "").strip()
+
+    return {
+        key: value
+        for key in (
+            GITLAB_BASE_URL_ENV,
+            GITLAB_TOKEN_ENV,
+            GITLAB_WEBHOOK_SECRET_ENV,
+            GITLAB_GROUP_ID_OR_PATH_ENV,
+            GITLAB_REVIEW_OWNER_ID_ENV,
+            GITLAB_REVIEW_CREATOR_ENV,
+            STUDIO_PUBLIC_BASE_URL_ENV,
+        )
+        if (value := _value(key))
+    }
+
+
 def _byteplus_vefaas_application_name_suggestion(name: str) -> str:
     suggestion = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower()).strip("-")
     suggestion = re.sub(r"-{2,}", "-", suggestion)
@@ -3562,6 +3594,10 @@ def _run_frontend_server(
         _sandbox_creator,
         github_app_review_storage_bucket=github_app_review_storage.bucket,
         github_app_review_storage_client_factory=(
+            github_app_review_storage_client_factory
+        ),
+        gitlab_app_review_storage_bucket=github_app_review_storage.bucket,
+        gitlab_app_review_storage_client_factory=(
             github_app_review_storage_client_factory
         ),
     )
@@ -11090,6 +11126,7 @@ def _run_frontend_server(
                     "/embed/run_sse",
                     "/web/auth-config",
                     "/web/github/app/webhook",
+                    "/web/gitlab/app/webhook",
                     "/web/site-logo",
                     "/web/sandbox/codex-project-handoff/sessions",
                     "/web/sandbox/codex-project-upload/sessions",
@@ -15190,6 +15227,7 @@ def frontend_deploy(
         ),
     )
     github_app_review_environment = _github_app_review_environment(veadk_environments)
+    gitlab_app_review_environment = _gitlab_app_review_environment(veadk_environments)
 
     # SECURITY: VeFaaS._create_function uploads *everything* in veadk_environments
     # (i.e. the deployer's whole .env) as function env vars. The frontend must
@@ -15257,6 +15295,7 @@ def frontend_deploy(
     veadk_environments.update(studio_storage_environment)
     veadk_environments.update(studio_environment_resource_environment)
     veadk_environments.update(github_app_review_environment)
+    veadk_environments.update(gitlab_app_review_environment)
     if client_secret:
         veadk_environments["OAUTH2_CLIENT_SECRET"] = client_secret
     veadk_environments.update(sidecar_environment)
