@@ -75,7 +75,11 @@ from veadk.cli.github_app_pr_review import (
     TosGitHubAppReviewRepositoryStore,
     create_review_record,
 )
-from veadk.cli.gitlab_app_mr_review import GitLabProject
+from veadk.cli.gitlab_app_mr_review import (
+    GitLabProject,
+    TosGitLabAppReviewProjectStore,
+    create_review_record as create_gitlab_review_record,
+)
 
 
 @pytest.mark.parametrize("is_vestack_deployment", [False, True])
@@ -1096,6 +1100,41 @@ def test_pull_request_review_record_status_can_be_completed() -> None:
     assert records[0].session_id == "remote-1"
 
 
+def test_gitlab_merge_request_review_record_status_can_be_completed() -> None:
+    storage = _FakeTosClient()
+    store = TosGitLabAppReviewProjectStore(
+        bucket="studio-state",
+        client_factory=lambda: storage,
+    )
+    record = create_gitlab_review_record(
+        instance_id="default",
+        base_url="https://gitlab.example.com",
+        project_id=123,
+        path_with_namespace="Group/nice",
+        merge_request_url="https://gitlab.example.com/Group/nice/-/merge_requests/7",
+        merge_request_iid=7,
+        status="started",
+        trigger="webhook",
+        session_id="remote-1",
+    )
+    asyncio.run(store.append_review_record(record))
+
+    updated = asyncio.run(
+        store.update_review_record_status(
+            record.record_id,
+            status="completed",
+        )
+    )
+
+    assert updated is not None
+    records, _page = asyncio.run(
+        store.review_records_page(frontend_sandbox.PageRequest(1, 10))
+    )
+    assert records[0].record_id == record.record_id
+    assert records[0].status == "completed"
+    assert records[0].session_id == "remote-1"
+
+
 def test_github_app_webhook_starts_pull_request_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1425,6 +1464,57 @@ def test_gitlab_app_webhook_starts_merge_request_review(
         "GITLAB_API_BASE": "https://gitlab.example.com/api/v4",
         "GIT_TERMINAL_PROMPT": "0",
     }
+
+
+def test_gitlab_manual_review_bounds_long_session_display_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VEADK_GITLAB_BASE_URL", "https://gitlab.example.com")
+    monkeypatch.setenv("VEADK_GITLAB_TOKEN", "gitlab-token")
+    monkeypatch.setenv("VEADK_GITLAB_WEBHOOK_SECRET", "secret")
+    long_path = "Group/veadk-mr-review-test-with-a-very-long-project-name"
+
+    class _FakeGitLabAppClient:
+        def __init__(self, config: object) -> None:
+            del config
+
+        async def projects(self) -> list[GitLabProject]:
+            return [
+                GitLabProject(
+                    instance_id="default",
+                    base_url="https://gitlab.example.com",
+                    project_id=123,
+                    path_with_namespace=long_path,
+                    name="veadk-mr-review-test-with-a-very-long-project-name",
+                    namespace="Group",
+                    web_url=f"https://gitlab.example.com/{long_path}",
+                    private=False,
+                )
+            ]
+
+    monkeypatch.setattr(frontend_sandbox, "GitLabAppClient", _FakeGitLabAppClient)
+    gateway = _FakeGateway()
+    client = TestClient(
+        _app(gateway, gitlab_app_review_storage_client=_FakeTosClient())
+    )
+
+    response = client.post(
+        "/web/gitlab/merge-request-reviews",
+        json={
+            "mergeRequestUrl": (
+                f"https://gitlab.example.com/{long_path}/-/merge_requests/7"
+            )
+        },
+        headers={"X-Test-User": "alice"},
+    )
+
+    assert response.status_code == 200
+    display_name = response.json()["displayName"]
+    assert display_name.startswith("MR Review: Group/")
+    assert display_name.endswith("name!7")
+    assert "..." in display_name
+    assert len(display_name) <= STUDIO_SANDBOX_DISPLAY_NAME_MAX_LENGTH
+    assert gateway.display_names[-1] == display_name
 
 
 def test_gitlab_app_webhook_ignores_disabled_project(

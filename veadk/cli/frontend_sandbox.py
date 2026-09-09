@@ -209,6 +209,9 @@ _SESSION_CODEX_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _GITHUB_PULL_REQUEST_URL_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?$"
 )
+_REVIEW_DISPLAY_NAME_ELLIPSIS = "..."
+_GITLAB_MR_REVIEW_NOTE_POLL_ATTEMPTS = 24
+_GITLAB_MR_REVIEW_NOTE_POLL_INTERVAL_SECONDS = 5.0
 _GITHUB_PULL_REQUEST_REVIEW_PROMPT = """请评审这个 Pull Request：{pull_request_url}
 
 要求：
@@ -218,6 +221,21 @@ _GITHUB_PULL_REQUEST_REVIEW_PROMPT = """请评审这个 Pull Request：{pull_req
 4.不要修改仓库文件，不要执行破坏性命令。
 5.评审完成后，必须使用 GitHub CLI 将评审结论评论到这个 Pull Request。
 6.执行结束后，请告知我你都进行了哪些操作，给出明确且清晰的反馈"""
+
+
+def _bounded_review_display_name(prefix: str, subject: str) -> str:
+    name = f"{prefix}: {subject}".strip()
+    if len(name) <= STUDIO_SANDBOX_DISPLAY_NAME_MAX_LENGTH:
+        return name
+    limit = STUDIO_SANDBOX_DISPLAY_NAME_MAX_LENGTH - len(prefix) - 2
+    if limit <= len(_REVIEW_DISPLAY_NAME_ELLIPSIS):
+        return name[:STUDIO_SANDBOX_DISPLAY_NAME_MAX_LENGTH]
+    subject_limit = limit - len(_REVIEW_DISPLAY_NAME_ELLIPSIS)
+    head = max(1, subject_limit // 2)
+    tail = max(1, subject_limit - head)
+    shortened = subject[:head] + _REVIEW_DISPLAY_NAME_ELLIPSIS + subject[-tail:]
+    return f"{prefix}: {shortened}"
+
 
 _GITLAB_MERGE_REQUEST_REVIEW_PROMPT = """请评审这个 GitLab Merge Request：{merge_request_url}
 
@@ -3767,7 +3785,7 @@ def mount_sandbox_routes(
         owner, repo, number = match.groups()
         session = await service.create(
             owner_id,
-            f"PR Review: {owner}/{repo}#{number}",
+            _bounded_review_display_name("PR Review", f"{owner}/{repo}#{number}"),
             creator_name,
             False,
             envs={
@@ -3900,9 +3918,13 @@ def mount_sandbox_routes(
         project: GitLabProject,
         merge_request_url: str,
     ) -> SandboxCloudSession:
+        _, merge_request_iid = parse_merge_request_url(config, merge_request_url)
         session = await service.create(
             owner_id,
-            f"MR Review: {project.path_with_namespace}!{parse_merge_request_url(config, merge_request_url)[1]}",
+            _bounded_review_display_name(
+                "MR Review",
+                f"{project.path_with_namespace}!{merge_request_iid}",
+            ),
             creator_name,
             False,
             envs={
@@ -3921,6 +3943,9 @@ def mount_sandbox_routes(
         *,
         session_id: str,
         owner_id: str,
+        config: GitLabAppConfig,
+        project_id: int,
+        merge_request_iid: int,
         merge_request_url: str,
         store: TosGitLabAppReviewProjectStore | None,
         record_id: str,
@@ -3928,16 +3953,22 @@ def mount_sandbox_routes(
         prompt = _GITLAB_MERGE_REQUEST_REVIEW_PROMPT.format(
             merge_request_url=merge_request_url
         )
+        status_finalized = False
 
         async def _update_status(status: str, reason: str = "") -> None:
+            nonlocal status_finalized
             if store is None or not record_id:
                 return
+            if status_finalized and status == "failed":
+                return
             try:
-                await store.update_review_record_status(
+                updated = await store.update_review_record_status(
                     record_id,
                     status=status,
                     reason=reason,
                 )
+                if updated is not None and status in {"completed", "failed"}:
+                    status_finalized = True
             except GitLabAppReviewError as error:
                 logger.warning(
                     "Failed to update GitLab MR review record %s: %s",
@@ -3945,7 +3976,51 @@ def mount_sandbox_routes(
                     error,
                 )
 
+        async def _baseline_note_ids() -> set[int]:
+            try:
+                return await GitLabAppClient(config).merge_request_note_ids(
+                    project_id,
+                    merge_request_iid,
+                )
+            except Exception as error:  # noqa: BLE001 - best-effort status shortcut
+                logger.info(
+                    "Failed to read GitLab MR notes before review for session %s: %s",
+                    session_id,
+                    _safe_error_message(error),
+                )
+                return set()
+
+        async def _mark_completed_when_review_note_appears(
+            baseline_note_ids: set[int],
+        ) -> None:
+            if store is None or not record_id:
+                return
+            client = GitLabAppClient(config)
+            for _attempt in range(_GITLAB_MR_REVIEW_NOTE_POLL_ATTEMPTS):
+                if status_finalized:
+                    return
+                await asyncio.sleep(_GITLAB_MR_REVIEW_NOTE_POLL_INTERVAL_SECONDS)
+                try:
+                    note_ids = await client.merge_request_note_ids(
+                        project_id,
+                        merge_request_iid,
+                    )
+                except Exception as error:  # noqa: BLE001 - best-effort status shortcut
+                    logger.info(
+                        "Failed to poll GitLab MR notes for session %s: %s",
+                        session_id,
+                        _safe_error_message(error),
+                    )
+                    continue
+                if note_ids - baseline_note_ids:
+                    await _update_status("completed")
+                    return
+
         async def _run_review_message() -> None:
+            baseline_note_ids = await _baseline_note_ids()
+            note_watcher = asyncio.create_task(
+                _mark_completed_when_review_note_appears(baseline_note_ids)
+            )
             try:
                 async for _event in service.stream_message(
                     session_id,
@@ -3961,6 +4036,10 @@ def mount_sandbox_routes(
                     session_id,
                     _safe_error_message(error),
                 )
+            finally:
+                note_watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await note_watcher
 
         asyncio.create_task(_run_review_message())
 
@@ -4183,6 +4262,9 @@ def mount_sandbox_routes(
             _schedule_gitlab_merge_request_review_message(
                 session_id=session.instance_id,
                 owner_id=config.review_owner_id,
+                config=config,
+                project_id=event.project_id,
+                merge_request_iid=event.merge_request_iid,
                 merge_request_url=event.merge_request_url,
                 store=store,
                 record_id=record.record_id,
@@ -4287,6 +4369,9 @@ def mount_sandbox_routes(
         _schedule_gitlab_merge_request_review_message(
             session_id=session.instance_id,
             owner_id=owner_id,
+            config=config,
+            project_id=project.project_id,
+            merge_request_iid=mr_iid,
             merge_request_url=merge_request_url.strip(),
             store=store,
             record_id=record_id,

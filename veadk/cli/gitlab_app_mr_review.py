@@ -419,6 +419,23 @@ class GitLabAppClient:
             raise GitLabAppReviewError("GitLab App 响应格式无效。")
         return _project_from_payload(self._config, payload)
 
+    async def merge_request_note_ids(
+        self,
+        project_id: int,
+        merge_request_iid: int,
+    ) -> set[int]:
+        payloads = await self._request_pages(
+            f"/projects/{project_id}/merge_requests/{merge_request_iid}/notes"
+        )
+        note_ids: set[int] = set()
+        for item in payloads:
+            if not isinstance(item, dict):
+                continue
+            note_id = item.get("id")
+            if isinstance(note_id, int) and note_id > 0:
+                note_ids.add(note_id)
+        return note_ids
+
     async def ensure_project_webhook(self, project_id: int) -> None:
         webhook_url = self._config.webhook_url
         if not webhook_url:
