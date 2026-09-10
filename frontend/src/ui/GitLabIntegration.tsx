@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type SVGProps } from "react";
 
 import {
   getGitLabAppConfig,
@@ -28,6 +28,22 @@ function ExternalIcon() {
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M6.5 4H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M9 3h4v4M8.5 7.5 13 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BackIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" {...props}>
+      <path d="m9.8 3.5-4.5 4.5 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GitLabLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="m22.54 9.64-.03-.08-2.2-6.81a.76.76 0 0 0-1.43-.08l-2.1 4.31H7.22l-2.1-4.31a.76.76 0 0 0-1.43.08l-2.2 6.81-.03.08a5.15 5.15 0 0 0 1.7 5.79l.01.01.02.01 8.81 6.58 8.81-6.58.02-.01.01-.01a5.15 5.15 0 0 0 1.7-5.79ZM12 20.08 8.65 8.59h6.7L12 20.08Z" />
     </svg>
   );
 }
@@ -264,231 +280,242 @@ export function GitLabIntegration({ onBack, onOpenSandboxSession }: GitLabIntegr
   };
 
   return (
-    <div className="github-integration">
+    <div className="github-integration-page">
       <header className="github-integration-header">
-        <button type="button" className="github-back" onClick={onBack}>返回</button>
+        <button type="button" className="github-back" onClick={onBack} aria-label="返回自动化">
+          <BackIcon />
+        </button>
+        <GitLabLogo className="github-integration-logo" />
         <div>
           <h1>GitLab MR Review</h1>
           <p>通过 GitLab webhook 触发 Sandbox 评审，并将结果写回 Merge Request。</p>
         </div>
       </header>
 
-      <div className="github-integration-card">
-        <div className={`github-app-card${config?.configured ? " is-ready" : ""}`}>
-          <div>
-            <strong>GitLab App 配置</strong>
-            <span>
-              {configLoading
-                ? "正在检查中心服务配置..."
-                : config?.configured
-                  ? `当前实例：${config.baseUrl}`
-                  : configError || config?.reason || "管理员未配置 GitLab App。"}
-            </span>
+      <div className="github-integration-layout">
+        <section className="github-section-panel">
+          <div className="github-panel-heading">
+            <p>请先为目标项目开启自动评审，再通过 webhook 或手动 URL 发起 MR 评审。</p>
           </div>
-          {config?.webhookUrl ? (
-            <a className="github-app-install-link" href={config.webhookUrl} target="_blank" rel="noreferrer">
-              Webhook
-              <ExternalIcon />
-            </a>
-          ) : null}
-        </div>
 
-        <section className="github-review-section github-app-repositories" aria-labelledby="gitlab-projects-title">
-          <div className="github-review-section-header">
-            <div>
-              <h2 id="gitlab-projects-title">可访问项目</h2>
-              <p>只有开启评审的项目会响应 GitLab webhook 自动触发。</p>
-            </div>
-            <button type="button" onClick={() => refreshProjects()} disabled={!config?.configured || projectsLoading}>
-              {projectsLoading ? "刷新中..." : "刷新"}
-            </button>
-          </div>
-          {projectsError ? <div className="github-submit-message is-error" role="alert">{projectsError}</div> : null}
-          {reviewSettings?.reviewSettingsConfigured === false && !projectsError ? (
-            <div className="github-submit-message is-error" role="alert">
-              {reviewSettings.reviewSettingsReason || "管理员未配置 Studio 持久化存储，无法保存启用评审设置。"}
-            </div>
-          ) : null}
-          <div className="github-app-repository-search">
-            <input
-              type="search"
-              value={projectQueryInput}
-              onChange={(event) => setProjectQueryInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  searchProjects();
-                }
-              }}
-              placeholder="搜索 group 或项目名"
-              aria-label="搜索 GitLab 项目"
-            />
-            <button type="button" onClick={searchProjects} disabled={!config?.configured || projectsLoading}>搜索</button>
-            {projectQuery ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setProjectQueryInput("");
-                  setProjectQuery("");
-                  setProjectsPage(1);
-                  refreshProjects(1, "");
-                }}
-                disabled={projectsLoading}
-              >
-                清除
-              </button>
-            ) : null}
-          </div>
-          {projectsLoading && projects.length === 0 ? <div className="github-app-repository-empty">正在读取 GitLab 项目...</div> : null}
-          {!projectsLoading && projects.length === 0 && !projectsError ? (
-            <div className="github-app-repository-empty">
-              {projectQuery ? `没有匹配 “${projectQuery}” 的 GitLab 项目。` : "GitLab App 暂无可访问项目。"}
-            </div>
-          ) : null}
-          {projects.length > 0 ? (
-            <div className="github-app-repository-list">
-              {projects.map((project) => {
-                const busy = updatingProject === project.projectId;
-                const disabled = reviewSettings?.reviewSettingsConfigured !== true || updatingProject !== null;
-                return (
-                  <div className="github-app-repository-row" key={`${project.instanceId}:${project.projectId}`}>
-                    <div className="github-app-repository-main">
-                      <a href={project.webUrl} target="_blank" rel="noreferrer" title={project.pathWithNamespace}>
-                        {project.pathWithNamespace}
-                        <ExternalIcon />
-                      </a>
-                      <span>{project.private ? "Private" : "Public"} · Project {project.projectId}{project.permissionsNote ? ` · ${project.permissionsNote}` : ""}</span>
-                    </div>
-                    <button
-                      type="button"
-                      className={`github-review-switch${project.reviewEnabled ? " is-on" : ""}`}
-                      role="switch"
-                      aria-checked={project.reviewEnabled}
-                      disabled={disabled}
-                      onClick={() => { void toggleProjectReview(project); }}
-                    >
-                      <span>{busy ? "保存中" : project.reviewEnabled ? "已启用" : "未启用"}</span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-          {showProjectsPagination ? (
-            <div className="github-list-pagination" aria-label="GitLab 项目分页">
-              <span>{paginationText(projectsPage, REVIEW_PAGE_SIZE, projects.length, projectsHasNextPage)}</span>
+          <div className="github-release-form">
+            <div className={`github-app-card${config?.configured ? " is-ready" : ""}`}>
               <div>
-                <button type="button" onClick={() => { setProjectsPage(projectsPage - 1); refreshProjects(projectsPage - 1, projectQuery); }} disabled={projectsPage <= 1 || projectsLoading}>上一页</button>
-                <button type="button" onClick={() => { setProjectsPage(projectsPage + 1); refreshProjects(projectsPage + 1, projectQuery); }} disabled={!projectsHasNextPage || projectsLoading}>下一页</button>
+                <strong>GitLab App 配置</strong>
+                <span>
+                  {configLoading
+                    ? "正在检查中心服务配置..."
+                    : config?.configured
+                      ? `当前实例：${config.baseUrl}`
+                      : configError || config?.reason || "管理员未配置 GitLab App。"}
+                </span>
               </div>
-            </div>
-          ) : null}
-        </section>
-
-        <div className="github-pr-review-sections">
-          <section className="github-review-section github-review-now" aria-labelledby="gitlab-review-now-title">
-            <div className="github-review-section-header">
-              <div>
-                <h2 id="gitlab-review-now-title">立刻评审</h2>
-                <p>输入当前 GitLab 实例下的 MR URL，立即创建 Sandbox 评审任务。</p>
-              </div>
-            </div>
-            <div className="github-review-section-body">
-              <div className="github-field">
-                <input
-                  aria-label="Merge Request URL"
-                  value={mergeRequestUrl}
-                  onChange={(event) => setMergeRequestUrl(event.target.value)}
-                  placeholder={`${config?.baseUrl || "https://gitlab.example.com"}/group/project/-/merge_requests/123`}
-                />
-                {reviewProject ? (
-                  <span className="github-field-help">
-                    {accessibleReviewProject
-                      ? `将使用 GitLab App 评审 ${accessibleReviewProject.pathWithNamespace}`
-                      : `MR URL 所属项目 ${reviewProject} 不在当前项目列表中`}
-                  </span>
-                ) : null}
-              </div>
-              {reviewError ? <div className="github-submit-message is-error" role="alert">{reviewError}</div> : null}
-              {reviewResult ? (
-                <div className="github-submit-message is-success" role="status">
-                  <span>已发起评审，Session {reviewResult.sessionId} 正在运行。</span>
-                </div>
+              {config?.webhookUrl ? (
+                <a className="github-app-install-link" href={config.webhookUrl} target="_blank" rel="noreferrer">
+                  Webhook
+                  <ExternalIcon />
+                </a>
               ) : null}
-              <div className="github-review-section-actions">
-                <button type="button" onClick={startReview} disabled={reviewSubmitting}>
-                  {reviewSubmitting ? "发起评审中..." : "立即发起评审"}
+            </div>
+
+            <section className="github-review-section github-app-repositories" aria-labelledby="gitlab-projects-title">
+              <div className="github-review-section-header">
+                <div>
+                  <h2 id="gitlab-projects-title">可访问项目</h2>
+                  <p>只有开启评审的项目会响应 GitLab webhook 自动触发。</p>
+                </div>
+                <button type="button" onClick={() => refreshProjects()} disabled={!config?.configured || projectsLoading}>
+                  {projectsLoading ? "刷新中..." : "刷新"}
                 </button>
               </div>
-            </div>
-          </section>
-
-          <section className="github-review-section github-review-records" aria-labelledby="gitlab-review-records-title">
-            <div className="github-review-section-header">
-              <div>
-                <h2 id="gitlab-review-records-title">评审记录</h2>
-                <p>展示最近自动触发和手动发起的评审任务。</p>
+              {projectsError ? <div className="github-submit-message is-error" role="alert">{projectsError}</div> : null}
+              {reviewSettings?.reviewSettingsConfigured === false && !projectsError ? (
+                <div className="github-submit-message is-error" role="alert">
+                  {reviewSettings.reviewSettingsReason || "管理员未配置 Studio 持久化存储，无法保存启用评审设置。"}
+                </div>
+              ) : null}
+              <div className="github-app-repository-search">
+                <input
+                  type="search"
+                  value={projectQueryInput}
+                  onChange={(event) => setProjectQueryInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      searchProjects();
+                    }
+                  }}
+                  placeholder="搜索 group 或项目名"
+                  aria-label="搜索 GitLab 项目"
+                />
+                <button type="button" onClick={searchProjects} disabled={!config?.configured || projectsLoading}>搜索</button>
+                {projectQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectQueryInput("");
+                      setProjectQuery("");
+                      setProjectsPage(1);
+                      refreshProjects(1, "");
+                    }}
+                    disabled={projectsLoading}
+                  >
+                    清除
+                  </button>
+                ) : null}
               </div>
-              <button type="button" onClick={() => refreshReviewRecords()} disabled={!config?.configured || reviewRecordsLoading}>
-                {reviewRecordsLoading ? "刷新中..." : "刷新"}
-              </button>
-            </div>
-            {reviewRecordsError ? <div className="github-submit-message is-error" role="alert">{reviewRecordsError}</div> : null}
-            {reviewRecordsSettings?.reviewSettingsConfigured === false && !reviewRecordsError ? (
-              <div className="github-submit-message is-error" role="alert">
-                {reviewRecordsSettings.reviewSettingsReason || "管理员未配置 Studio 持久化存储，无法读取评审记录。"}
-              </div>
-            ) : null}
-            {reviewRecordsLoading && reviewRecords.length === 0 ? <div className="github-app-repository-empty">正在读取 MR 评审记录...</div> : null}
-            {!reviewRecordsLoading && reviewRecords.length === 0 && !reviewRecordsError ? <div className="github-app-repository-empty">暂无 MR 评审记录。</div> : null}
-            {reviewRecords.length > 0 ? (
-              <div className="github-review-record-list">
-                {reviewRecords.map((record) => {
-                  const reasonText = reviewRecordReasonText(record);
-                  const reviewSessionId = record.status === "completed" ? "" : record.sessionId;
-                  return (
-                    <div className="github-review-record-row" key={record.id}>
-                      <div className="github-review-record-main">
-                        <div className="github-review-record-title">
-                          <a href={record.mergeRequestUrl} target="_blank" rel="noreferrer">
-                            {record.pathWithNamespace}!{record.mergeRequestIid}
+              {projectsLoading && projects.length === 0 ? <div className="github-app-repository-empty">正在读取 GitLab 项目...</div> : null}
+              {!projectsLoading && projects.length === 0 && !projectsError ? (
+                <div className="github-app-repository-empty">
+                  {projectQuery ? `没有匹配 “${projectQuery}” 的 GitLab 项目。` : "GitLab App 暂无可访问项目。"}
+                </div>
+              ) : null}
+              {projects.length > 0 ? (
+                <div className="github-app-repository-list">
+                  {projects.map((project) => {
+                    const busy = updatingProject === project.projectId;
+                    const disabled = reviewSettings?.reviewSettingsConfigured !== true || updatingProject !== null;
+                    return (
+                      <div className="github-app-repository-row" key={`${project.instanceId}:${project.projectId}`}>
+                        <div className="github-app-repository-main">
+                          <a href={project.webUrl} target="_blank" rel="noreferrer" title={project.pathWithNamespace}>
+                            {project.pathWithNamespace}
                             <ExternalIcon />
                           </a>
-                          <span className={`github-review-record-status is-${record.status}`}>
-                            {reviewRecordStatusText(record.status)}
-                          </span>
+                          <span>{project.private ? "Private" : "Public"} · Project {project.projectId}{project.permissionsNote ? ` · ${project.permissionsNote}` : ""}</span>
                         </div>
-                        <span>
-                          {reviewRecordTriggerText(record.trigger)}
-                          {record.action ? ` · ${record.action}` : ""}
-                          {" · "}
-                          {reviewRecordTime(record.createdAt)}
-                          {reasonText ? ` · ${reasonText}` : ""}
-                        </span>
+                        <button
+                          type="button"
+                          className={`github-review-switch${project.reviewEnabled ? " is-on" : ""}`}
+                          role="switch"
+                          aria-checked={project.reviewEnabled}
+                          disabled={disabled}
+                          onClick={() => { void toggleProjectReview(project); }}
+                        >
+                          <span>{busy ? "保存中" : project.reviewEnabled ? "已启用" : "未启用"}</span>
+                        </button>
                       </div>
-                      <div className="github-review-record-actions">
-                        {reviewSessionId && onOpenSandboxSession ? (
-                          <button type="button" onClick={() => onOpenSandboxSession(reviewSessionId)}>
-                            打开 Session
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            {showRecordsPagination ? (
-              <div className="github-list-pagination" aria-label="GitLab 评审记录分页">
-                <span>{paginationText(reviewRecordsPage, REVIEW_PAGE_SIZE, reviewRecords.length, reviewRecordsHasNextPage)}</span>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {showProjectsPagination ? (
+                <div className="github-list-pagination" aria-label="GitLab 项目分页">
+                  <span>{paginationText(projectsPage, REVIEW_PAGE_SIZE, projects.length, projectsHasNextPage)}</span>
+                  <div>
+                    <button type="button" onClick={() => { setProjectsPage(projectsPage - 1); refreshProjects(projectsPage - 1, projectQuery); }} disabled={projectsPage <= 1 || projectsLoading}>上一页</button>
+                    <button type="button" onClick={() => { setProjectsPage(projectsPage + 1); refreshProjects(projectsPage + 1, projectQuery); }} disabled={!projectsHasNextPage || projectsLoading}>下一页</button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          </div>
+
+          <div className="github-pr-review-sections">
+            <section className="github-review-section github-review-now" aria-labelledby="gitlab-review-now-title">
+              <div className="github-review-section-header">
                 <div>
-                  <button type="button" onClick={() => { setReviewRecordsPage(reviewRecordsPage - 1); refreshReviewRecords(reviewRecordsPage - 1); }} disabled={reviewRecordsPage <= 1 || reviewRecordsLoading}>上一页</button>
-                  <button type="button" onClick={() => { setReviewRecordsPage(reviewRecordsPage + 1); refreshReviewRecords(reviewRecordsPage + 1); }} disabled={!reviewRecordsHasNextPage || reviewRecordsLoading}>下一页</button>
+                  <h2 id="gitlab-review-now-title">立刻评审</h2>
+                  <p>输入当前 GitLab 实例下的 MR URL，立即创建 Sandbox 评审任务。</p>
                 </div>
               </div>
-            ) : null}
-          </section>
-        </div>
+              <div className="github-review-section-body">
+                <div className="github-field">
+                  <input
+                    aria-label="Merge Request URL"
+                    value={mergeRequestUrl}
+                    onChange={(event) => setMergeRequestUrl(event.target.value)}
+                    placeholder={`${config?.baseUrl || "https://gitlab.example.com"}/group/project/-/merge_requests/123`}
+                  />
+                  {reviewProject ? (
+                    <span className="github-field-help">
+                      {accessibleReviewProject
+                        ? `将使用 GitLab App 评审 ${accessibleReviewProject.pathWithNamespace}`
+                        : `MR URL 所属项目 ${reviewProject} 不在当前项目列表中`}
+                    </span>
+                  ) : null}
+                </div>
+                {reviewError ? <div className="github-submit-message is-error" role="alert">{reviewError}</div> : null}
+                {reviewResult ? (
+                  <div className="github-submit-message is-success" role="status">
+                    <span>已发起评审，Session {reviewResult.sessionId} 正在运行。</span>
+                  </div>
+                ) : null}
+                <div className="github-review-section-actions">
+                  <button type="button" onClick={startReview} disabled={reviewSubmitting}>
+                    {reviewSubmitting ? "发起评审中..." : "立即发起评审"}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section className="github-review-section github-review-records" aria-labelledby="gitlab-review-records-title">
+              <div className="github-review-section-header">
+                <div>
+                  <h2 id="gitlab-review-records-title">评审记录</h2>
+                  <p>展示最近自动触发和手动发起的评审任务。</p>
+                </div>
+                <button type="button" onClick={() => refreshReviewRecords()} disabled={!config?.configured || reviewRecordsLoading}>
+                  {reviewRecordsLoading ? "刷新中..." : "刷新"}
+                </button>
+              </div>
+              {reviewRecordsError ? <div className="github-submit-message is-error" role="alert">{reviewRecordsError}</div> : null}
+              {reviewRecordsSettings?.reviewSettingsConfigured === false && !reviewRecordsError ? (
+                <div className="github-submit-message is-error" role="alert">
+                  {reviewRecordsSettings.reviewSettingsReason || "管理员未配置 Studio 持久化存储，无法读取评审记录。"}
+                </div>
+              ) : null}
+              {reviewRecordsLoading && reviewRecords.length === 0 ? <div className="github-app-repository-empty">正在读取 MR 评审记录...</div> : null}
+              {!reviewRecordsLoading && reviewRecords.length === 0 && !reviewRecordsError ? <div className="github-app-repository-empty">暂无 MR 评审记录。</div> : null}
+              {reviewRecords.length > 0 ? (
+                <div className="github-review-record-list">
+                  {reviewRecords.map((record) => {
+                    const reasonText = reviewRecordReasonText(record);
+                    const reviewSessionId = record.status === "completed" ? "" : record.sessionId;
+                    return (
+                      <div className="github-review-record-row" key={record.id}>
+                        <div className="github-review-record-main">
+                          <div className="github-review-record-title">
+                            <a href={record.mergeRequestUrl} target="_blank" rel="noreferrer">
+                              {record.pathWithNamespace}!{record.mergeRequestIid}
+                              <ExternalIcon />
+                            </a>
+                            <span className={`github-review-record-status is-${record.status}`}>
+                              {reviewRecordStatusText(record.status)}
+                            </span>
+                          </div>
+                          <span>
+                            {reviewRecordTriggerText(record.trigger)}
+                            {record.action ? ` · ${record.action}` : ""}
+                            {" · "}
+                            {reviewRecordTime(record.createdAt)}
+                            {reasonText ? ` · ${reasonText}` : ""}
+                          </span>
+                        </div>
+                        <div className="github-review-record-actions">
+                          {reviewSessionId && onOpenSandboxSession ? (
+                            <button type="button" onClick={() => onOpenSandboxSession(reviewSessionId)}>
+                              打开 Session
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {showRecordsPagination ? (
+                <div className="github-list-pagination" aria-label="GitLab 评审记录分页">
+                  <span>{paginationText(reviewRecordsPage, REVIEW_PAGE_SIZE, reviewRecords.length, reviewRecordsHasNextPage)}</span>
+                  <div>
+                    <button type="button" onClick={() => { setReviewRecordsPage(reviewRecordsPage - 1); refreshReviewRecords(reviewRecordsPage - 1); }} disabled={reviewRecordsPage <= 1 || reviewRecordsLoading}>上一页</button>
+                    <button type="button" onClick={() => { setReviewRecordsPage(reviewRecordsPage + 1); refreshReviewRecords(reviewRecordsPage + 1); }} disabled={!reviewRecordsHasNextPage || reviewRecordsLoading}>下一页</button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          </div>
+        </section>
       </div>
     </div>
   );

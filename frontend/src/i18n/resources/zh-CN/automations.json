@@ -60,9 +60,9 @@
       }
     },
     "review": {
-      "name": "PR 自动评审",
+      "name": "GitHub PR 自动评审",
       "description": "通过 GitHub App 在隔离 Sandbox 中评审 Pull Request。",
-      "title": "PR 自动评审",
+      "title": "GitHub PR 自动评审",
       "subtitle": "通过 GitHub App 触发 Sandbox 评审，并将结果发布到 Pull Request",
       "panel": "请先将 GitHub App 安装到目标仓库，再为每个仓库启用自动评审。",
       "submitLabel": "安装 GitHub App",
